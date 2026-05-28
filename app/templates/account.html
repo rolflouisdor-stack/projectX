@@ -1,0 +1,231 @@
+{% extends "_base.html" %}
+{% block title %}Account — Gravitas Leads{% endblock %}
+
+{% block nav %}
+<a href="/dashboard" class="pp-nav-link">Dashboard</a>
+<a href="/jobs" class="pp-nav-link">Job History</a>
+<a href="#" class="pp-nav-link">Billing</a>
+<a href="/account" class="pp-nav-link active">Account</a>
+{% endblock %}
+
+{% block content %}
+<div class="pp-page-header">
+    <div>
+        <h1 class="pp-page-title">Account</h1>
+        <p class="pp-page-sub">Update your contact info, company details, and saved payment method.</p>
+    </div>
+</div>
+
+<div class="pp-grid-2" style="align-items: start; gap: 20px;">
+    <div class="pp-card">
+        <div class="pp-card-title">Your profile</div>
+        <form id="profileForm">
+            <div class="pp-form-row">
+                <label class="pp-label" for="full_name">Full name</label>
+                <input class="pp-input" type="text" id="full_name" required>
+            </div>
+            <div class="pp-form-row">
+                <label class="pp-label" for="email">Email</label>
+                <input class="pp-input" type="email" id="email" required>
+            </div>
+            <div class="pp-form-row">
+                <label class="pp-label" for="phone">
+                    Phone <span class="pp-label-optional">(optional)</span>
+                </label>
+                <input class="pp-input" type="tel" id="phone" placeholder="(555) 123-4567">
+            </div>
+            <div style="display:flex; align-items:center; gap:12px;">
+                <button type="submit" class="pp-btn pp-btn-primary">Save profile</button>
+                <span class="pp-text-sm" id="profileStatus" style="display:none;"></span>
+            </div>
+        </form>
+    </div>
+
+    <div class="pp-card">
+        <div class="pp-card-title">Company</div>
+        <form id="companyForm">
+            <div class="pp-form-row">
+                <label class="pp-label" for="company_name">Company name</label>
+                <input class="pp-input" type="text" id="company_name" required>
+            </div>
+            <div class="pp-form-row pp-text-sm pp-text-muted" id="companyMeta"></div>
+            <div style="display:flex; align-items:center; gap:12px;">
+                <button type="submit" class="pp-btn pp-btn-primary">Save company</button>
+                <span class="pp-text-sm" id="companyStatus" style="display:none;"></span>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="pp-card" style="margin-top: 20px;">
+    <div class="pp-card-title">Payment method</div>
+
+    <div id="cardOnFile" style="display:none; margin: 6px 0 18px;">
+        <div style="display:flex; align-items:center; gap:16px; padding:14px 16px; border:1px solid #e5e7eb; border-radius:10px; background:#fafafa;">
+            <div style="font-size:22px;" id="cardIcon">💳</div>
+            <div style="flex:1;">
+                <div style="font-weight:600;" id="cardLine">—</div>
+                <div class="pp-text-sm pp-text-muted" id="cardExpLine">—</div>
+            </div>
+            <button type="button" class="pp-btn pp-btn-ghost pp-btn-sm" id="removeCardBtn">Remove</button>
+        </div>
+    </div>
+
+    <div id="cardEmptyHint" class="pp-text-sm pp-text-muted" style="margin: 0 0 14px;">
+        No card on file. Add one below to pay for scrubs and purchases without re-entering details.
+    </div>
+
+    <form id="cardForm">
+        <div class="pp-form-row">
+            <label class="pp-label" for="cardholder_name">Cardholder name</label>
+            <input class="pp-input" type="text" id="cardholder_name" placeholder="Jane Doe" autocomplete="cc-name">
+        </div>
+        <div class="pp-form-row">
+            <label class="pp-label" for="card_number">Card number</label>
+            <input class="pp-input" type="text" id="card_number" placeholder="1234 5678 9012 3456" inputmode="numeric" autocomplete="cc-number" required>
+        </div>
+        <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:12px;">
+            <div class="pp-form-row">
+                <label class="pp-label" for="exp_month">Exp month</label>
+                <input class="pp-input" type="number" id="exp_month" placeholder="MM" min="1" max="12" required>
+            </div>
+            <div class="pp-form-row">
+                <label class="pp-label" for="exp_year">Exp year</label>
+                <input class="pp-input" type="number" id="exp_year" placeholder="YYYY" min="2025" max="2099" required>
+            </div>
+            <div class="pp-form-row">
+                <label class="pp-label" for="cvc">CVC</label>
+                <input class="pp-input" type="text" id="cvc" placeholder="123" inputmode="numeric" autocomplete="cc-csc" maxlength="4" required>
+            </div>
+        </div>
+        <div class="pp-text-sm pp-text-muted pp-mb-12">
+            We never store your full card number. Only brand, last four digits, and expiry are kept on file.
+            Production wiring uses Stripe Elements so the PAN never reaches our servers.
+        </div>
+        <div style="display:flex; align-items:center; gap:12px;">
+            <button type="submit" class="pp-btn pp-btn-primary" id="cardSubmitBtn">Save card</button>
+            <span class="pp-text-sm" id="cardStatus" style="display:none;"></span>
+        </div>
+    </form>
+</div>
+
+<script>
+const BRAND_GLYPHS = {
+    visa: '💳', mastercard: '💳', amex: '💳', discover: '💳',
+    diners: '💳', jcb: '💳', card: '💳'
+};
+
+function showStatus(el, msg, kind) {
+    el.textContent = msg;
+    el.style.display = 'inline';
+    el.style.color = kind === 'error' ? '#b91c1c' : (kind === 'ok' ? '#15803d' : '#475569');
+    if (kind === 'ok') {
+        setTimeout(() => { el.style.display = 'none'; }, 2500);
+    }
+}
+
+function paintCard(pm) {
+    const onFile = document.getElementById('cardOnFile');
+    const empty = document.getElementById('cardEmptyHint');
+    const submitBtn = document.getElementById('cardSubmitBtn');
+    if (!pm) {
+        onFile.style.display = 'none';
+        empty.style.display = 'block';
+        submitBtn.textContent = 'Save card';
+        return;
+    }
+    onFile.style.display = 'block';
+    empty.style.display = 'none';
+    submitBtn.textContent = 'Replace card';
+    document.getElementById('cardIcon').textContent = BRAND_GLYPHS[pm.brand] || '💳';
+    const brand = pm.brand ? pm.brand.charAt(0).toUpperCase() + pm.brand.slice(1) : 'Card';
+    document.getElementById('cardLine').textContent = `${brand} •••• ${pm.last4}`;
+    const mm = String(pm.exp_month).padStart(2, '0');
+    document.getElementById('cardExpLine').textContent =
+        `Expires ${mm}/${pm.exp_year}` + (pm.cardholder_name ? ` — ${pm.cardholder_name}` : '');
+}
+
+async function loadAccount() {
+    const a = await gmFetch('/api/account');
+    document.getElementById('full_name').value = a.user.full_name || '';
+    document.getElementById('email').value = a.user.email || '';
+    document.getElementById('phone').value = a.user.phone || '';
+    document.getElementById('company_name').value = a.company ? a.company.company_name : '';
+    if (a.company) {
+        const created = (a.company.created_at || '').slice(0, 10);
+        document.getElementById('companyMeta').textContent =
+            `Status: ${a.company.status}${created ? ' · Created ' + created : ''}`;
+    }
+    paintCard(a.payment_method);
+}
+
+document.getElementById('profileForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const status = document.getElementById('profileStatus');
+    try {
+        await gmFetch('/api/account/profile', {
+            method: 'PUT',
+            body: {
+                full_name: document.getElementById('full_name').value,
+                email: document.getElementById('email').value,
+                phone: document.getElementById('phone').value,
+            },
+        });
+        showStatus(status, 'Saved', 'ok');
+    } catch (err) {
+        showStatus(status, err.message, 'error');
+    }
+});
+
+document.getElementById('companyForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const status = document.getElementById('companyStatus');
+    try {
+        await gmFetch('/api/account/company', {
+            method: 'PUT',
+            body: { company_name: document.getElementById('company_name').value },
+        });
+        showStatus(status, 'Saved', 'ok');
+    } catch (err) {
+        showStatus(status, err.message, 'error');
+    }
+});
+
+document.getElementById('cardForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const status = document.getElementById('cardStatus');
+    try {
+        const pm = await gmFetch('/api/account/payment-method', {
+            method: 'PUT',
+            body: {
+                card_number: document.getElementById('card_number').value,
+                exp_month: document.getElementById('exp_month').value,
+                exp_year: document.getElementById('exp_year').value,
+                cvc: document.getElementById('cvc').value,
+                cardholder_name: document.getElementById('cardholder_name').value,
+            },
+        });
+        paintCard(pm);
+        document.getElementById('card_number').value = '';
+        document.getElementById('exp_month').value = '';
+        document.getElementById('exp_year').value = '';
+        document.getElementById('cvc').value = '';
+        showStatus(status, 'Card saved', 'ok');
+    } catch (err) {
+        showStatus(status, err.message, 'error');
+    }
+});
+
+document.getElementById('removeCardBtn').addEventListener('click', async () => {
+    if (!confirm('Remove the card on file?')) return;
+    try {
+        await gmFetch('/api/account/payment-method', { method: 'DELETE' });
+        paintCard(null);
+    } catch (err) {
+        alert(err.message);
+    }
+});
+
+document.addEventListener('DOMContentLoaded', loadAccount);
+</script>
+{% endblock %}

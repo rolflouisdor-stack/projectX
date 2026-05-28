@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Gravitas Leads — Mailer Portal{% endblock %}</title>
+    <link rel="icon" type="image/png" href="{{ url_for('static', filename='img/gravitas_logo.png') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/mailer.css') }}">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    {% block head %}{% endblock %}
+</head>
+<body class="pp-body pp-publisher">
+    {% set brand_home = '/dashboard' if partner else '/login' %}
+    <header class="pp-header">
+        <div class="pp-header-inner">
+            <a href="{{ brand_home }}" class="pp-brand">
+                <img src="{{ url_for('static', filename='img/gravitas_logo.png') }}" alt="Gravitas Leads" class="pp-brand-logo">
+                <span class="pp-brand-divider">|</span>
+                <span class="pp-brand-portal">Mailer Portal</span>
+            </a>
+            <nav class="pp-nav">{% block nav %}{% endblock %}</nav>
+            <div class="pp-header-actions">
+                {% if partner %}
+                <span class="pp-user-chip">
+                    <span class="pp-user-avatar">{{ partner.company_name[:1] | upper }}</span>
+                    <span class="pp-user-name">{{ partner.company_name }}</span>
+                </span>
+                <button type="button" class="pp-btn pp-btn-ghost" onclick="gmLogout()">Logout</button>
+                {% endif %}
+            </div>
+        </div>
+    </header>
+
+    <main class="pp-main">{% block content %}{% endblock %}</main>
+
+    <footer class="pp-footer">
+        <div class="pp-footer-inner">
+            <span>&copy; 2026 Gravitas Leads — Mailer Platform</span>
+            <span class="pp-footer-links">
+                <a href="#">Support</a>
+                <a href="#">Terms</a>
+                <a href="#">Privacy</a>
+            </span>
+        </div>
+    </footer>
+
+    <script>
+    // ─── Shared helpers used by every mailer page ───
+    async function gmFetch(url, opts) {
+        opts = opts || {};
+        opts.headers = Object.assign({}, opts.headers || {});
+        if (opts.body && !(opts.body instanceof FormData) && typeof opts.body !== 'string') {
+            opts.body = JSON.stringify(opts.body);
+            opts.headers['Content-Type'] = 'application/json';
+        }
+        opts.credentials = 'include';
+        const r = await fetch(url, opts);
+        const ct = r.headers.get('Content-Type') || '';
+        const body = ct.includes('application/json') ? await r.json() : await r.text();
+        if (!r.ok) {
+            const msg = (body && body.error) || `HTTP ${r.status}`;
+            throw new Error(msg);
+        }
+        return body;
+    }
+    async function gmLogout() {
+        try { await gmFetch('/api/auth/logout', { method: 'POST' }); } catch (e) {}
+        window.location.href = '/login';
+    }
+    function fmtNum(n) { return Number(n || 0).toLocaleString('en-US'); }
+    function fmtMoney(cents) { return '$' + (Number(cents || 0) / 100).toLocaleString('en-US', { maximumFractionDigits: 0 }); }
+    </script>
+    {% block scripts %}{% endblock %}
+</body>
+</html>

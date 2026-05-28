@@ -1,0 +1,580 @@
+{% extends "_base.html" %}
+{% block title %}Scrub a list — Gravitas Leads{% endblock %}
+
+{% block nav %}
+<a href="/dashboard" class="pp-nav-link">Dashboard</a>
+<a href="/jobs" class="pp-nav-link">Job History</a>
+<a href="#" class="pp-nav-link">Billing</a>
+<a href="/account" class="pp-nav-link">Account</a>
+{% endblock %}
+
+{% block content %}
+<div class="pp-page-header">
+    <div>
+        <a href="/dashboard" class="pp-text-sm pp-text-muted" style="display:inline-block; margin-bottom: 6px;">← Back to dashboard</a>
+        <h1 class="pp-page-title">Scrub a list</h1>
+        <p class="pp-page-sub">Upload your list, map your columns, and we'll tell you which records are unique against our premium data — you only pay for those.</p>
+    </div>
+</div>
+
+<div class="pp-stepper" id="stepper">
+    <div class="pp-step active" data-step="1"><span class="pp-step-dot">1</span><span class="pp-step-label">Upload list</span></div>
+    <div class="pp-step-bar"></div>
+    <div class="pp-step" data-step="2"><span class="pp-step-dot">2</span><span class="pp-step-label">Map columns</span></div>
+    <div class="pp-step-bar"></div>
+    <div class="pp-step" data-step="3"><span class="pp-step-dot">3</span><span class="pp-step-label">Processing</span></div>
+    <div class="pp-step-bar"></div>
+    <div class="pp-step" data-step="4"><span class="pp-step-dot">4</span><span class="pp-step-label">Review</span></div>
+    <div class="pp-step-bar"></div>
+    <div class="pp-step" data-step="5"><span class="pp-step-dot">5</span><span class="pp-step-label">Payment</span></div>
+    <div class="pp-step-bar"></div>
+    <div class="pp-step" data-step="6"><span class="pp-step-dot">6</span><span class="pp-step-label">Download</span></div>
+</div>
+
+<!-- Step 1: Upload -->
+<section class="pp-step-pane" data-pane="1">
+    <div class="pp-card">
+        <div class="pp-card-title">Upload your list</div>
+        <p class="pp-card-sub" style="margin-top:-8px;">CSV, TSV, pipe-delimited TXT, or XLSX. Files up to 500 MB. Headers must be on the first row.</p>
+
+        <label class="pp-upload-zone" id="uploadZone" for="fileInput">
+            <div class="pp-upload-icon">⬆</div>
+            <h4 class="pp-upload-title">Drag a file here, or click to browse</h4>
+            <p class="pp-upload-help">CSV, TSV, TXT, XLSX. Max 500 MB.</p>
+            <input class="pp-upload-input" type="file" id="fileInput" accept=".csv,.tsv,.txt,.xlsx">
+        </label>
+        <div id="fileChosen"></div>
+
+        <div class="pp-opt-toggle checked" id="cleanToggle">
+            <div class="pp-opt-check">✓</div>
+            <div class="pp-opt-text">
+                <div class="pp-opt-title">Clean my email list (recommended)</div>
+                <div class="pp-opt-sub">Real-time validation. Removes invalid, undeliverable, and disposable addresses <strong>before</strong> scrubbing. Pricing premium: <strong>+20%</strong>.</div>
+            </div>
+        </div>
+
+        <!-- Upload progress (hidden until the user clicks Start scrub) -->
+        <div id="uploadProgressWrap" style="display:none; margin-top: 16px;">
+            <div class="pp-progress-bar-outer"><div class="pp-progress-bar-inner" id="uploadBar"></div></div>
+            <div class="pp-flex-between pp-mt-12">
+                <span class="pp-text-sm pp-text-muted" id="uploadLabel">Uploading…</span>
+                <span class="pp-text-sm pp-text-muted" id="uploadPct">0%</span>
+            </div>
+        </div>
+
+        <div class="pp-divider"></div>
+        <div class="pp-flex-between">
+            <a href="/dashboard" class="pp-btn pp-btn-secondary">← Cancel</a>
+            <button class="pp-btn pp-btn-primary pp-btn-lg" id="step1Next" disabled>Start scrub →</button>
+        </div>
+    </div>
+</section>
+
+<!-- Step 2: Map columns -->
+<section class="pp-step-pane" data-pane="2" style="display:none;">
+    <div class="pp-card">
+        <div class="pp-card-title">Map your columns</div>
+        <p class="pp-card-sub" style="margin-top:-8px;">
+            We detected these columns in your file. Match each one to a standard field, name it as a custom field,
+            or skip it. We've pre-filled the obvious matches.
+        </p>
+
+        <div id="mappingError" class="pp-text-sm" style="display:none; color:#c0392b; margin: 8px 0 14px;"></div>
+
+        <div style="overflow-x:auto;">
+            <table class="pp-table" id="mappingTable" style="width:100%;">
+                <thead>
+                    <tr>
+                        <th style="text-align:left;">Your column</th>
+                        <th style="text-align:left;">Sample values</th>
+                        <th style="text-align:left;">Maps to</th>
+                        <th style="text-align:left;">Custom name</th>
+                        <th style="text-align:center;">Skip</th>
+                    </tr>
+                </thead>
+                <tbody id="mappingTbody"></tbody>
+            </table>
+        </div>
+
+        <div class="pp-divider"></div>
+        <div class="pp-flex-between">
+            <button class="pp-btn pp-btn-secondary" id="step2Back">← Re-upload</button>
+            <button class="pp-btn pp-btn-primary pp-btn-lg" id="step2Next">Confirm mapping →</button>
+        </div>
+    </div>
+</section>
+
+<!-- Step 3: Processing -->
+<section class="pp-step-pane" data-pane="3" style="display:none;">
+    <div class="pp-card">
+        <div class="pp-card-title">Processing your list</div>
+        <p class="pp-card-sub" style="margin-top:-8px;">This runs in the background. Larger files take a few minutes.</p>
+
+        <div class="pp-progress-stages" id="stages">
+            <div class="pp-progress-stage" data-stage="importing"><div class="pp-stage-icon">1</div><div class="pp-stage-text"><div class="pp-stage-label">Importing rows</div><div class="pp-stage-sub">Reading your file and applying your column mapping</div></div></div>
+            <div class="pp-progress-stage" data-stage="validating" id="cleanStage"><div class="pp-stage-icon">2</div><div class="pp-stage-text"><div class="pp-stage-label">Validating emails</div><div class="pp-stage-sub">Live SMTP check + disposable / role detection</div></div></div>
+            <div class="pp-progress-stage" data-stage="scrubbing"><div class="pp-stage-icon">3</div><div class="pp-stage-text"><div class="pp-stage-label">Matching against premium data</div><div class="pp-stage-sub">Cross-referencing every record in our verticals</div></div></div>
+            <div class="pp-progress-stage" data-stage="priced"><div class="pp-stage-icon">4</div><div class="pp-stage-text"><div class="pp-stage-label">Computing uniqueness + pricing</div><div class="pp-stage-sub">Calculating your final unique-record count</div></div></div>
+        </div>
+
+        <div class="pp-progress-bar-outer"><div class="pp-progress-bar-inner" id="progressBar"></div></div>
+        <div class="pp-flex-between pp-mt-12">
+            <span class="pp-text-sm pp-text-muted" id="progressLabel">Starting…</span>
+            <span class="pp-text-sm pp-text-muted" id="progressPct">0%</span>
+        </div>
+    </div>
+</section>
+
+<!-- Step 4: Review -->
+<section class="pp-step-pane" data-pane="4" style="display:none;">
+    <div class="pp-card">
+        <div class="pp-card-title">Scrub results <span class="pp-badge pp-badge-success">Complete</span></div>
+        <p class="pp-card-sub" style="margin-top:-8px;">Pricing is based on <strong>unique records</strong> only.</p>
+
+        <div class="pp-result-grid">
+            <div class="pp-result-stat"><div class="label">Records uploaded</div><div class="value" id="rsUploaded">—</div></div>
+            <div class="pp-result-stat" id="rsCleanCard" style="display:none;"><div class="label">After cleaning</div><div class="value" id="rsClean">—</div><div class="pp-text-sm pp-text-muted" id="rsCleanRemoved"></div></div>
+            <div class="pp-result-stat highlight"><div class="label">Unique records</div><div class="value" id="rsUnique">—</div><div class="pp-text-sm pp-text-muted" id="rsUniquePct"></div></div>
+            <div class="pp-result-stat"><div class="label">Already in your data</div><div class="value" id="rsOverlap">—</div><div class="pp-text-sm pp-text-muted">Not charged</div></div>
+        </div>
+
+        <div class="pp-price-card">
+            <div>
+                <div class="pp-price-label">Total due</div>
+                <div class="pp-price-amount" id="rsPrice">$0</div>
+                <div class="pp-price-detail" id="rsPriceDetail"></div>
+            </div>
+            <button class="pp-btn pp-btn-primary pp-btn-lg" id="step4Next">Continue to payment →</button>
+        </div>
+
+        <div class="pp-flex-between">
+            <button class="pp-btn pp-btn-secondary" onclick="location.reload()">Start over</button>
+            <span class="pp-text-sm pp-text-muted">Pricing locked for 24 hours.</span>
+        </div>
+    </div>
+</section>
+
+<!-- Step 5: Payment -->
+<section class="pp-step-pane" data-pane="5" style="display:none;">
+    <div class="pp-grid-2">
+        <div class="pp-card">
+            <div class="pp-card-title">Payment</div>
+            <p class="pp-card-sub" style="margin-top:-8px;">Secure card payment via Stripe. (Stub mode — accepting any input for now.)</p>
+            <div class="pp-form-row"><label class="pp-label">Card details</label><div class="pp-input" style="padding: 14px; color: var(--pp-text-light); font-family: monospace;">[Stripe Elements mount point]</div></div>
+            <div class="pp-auth-grid-2">
+                <div class="pp-form-row"><label class="pp-label">Cardholder name</label><input class="pp-input" type="text" placeholder="As on card"></div>
+                <div class="pp-form-row"><label class="pp-label">ZIP / Postal</label><input class="pp-input" type="text" placeholder="10001"></div>
+            </div>
+            <div class="pp-divider"></div>
+            <div class="pp-flex-between">
+                <button class="pp-btn pp-btn-secondary" data-prev>← Back to review</button>
+                <button class="pp-btn pp-btn-primary pp-btn-lg" id="step5Pay">Pay <span id="payAmount">$0</span></button>
+            </div>
+        </div>
+        <div class="pp-card">
+            <div class="pp-card-title">Order summary</div>
+            <table class="pp-table" style="margin: -8px -8px;">
+                <tbody>
+                    <tr><td class="pp-text-muted">Records uploaded</td><td class="number" id="osUploaded">—</td></tr>
+                    <tr id="osCleanRow" style="display:none;"><td class="pp-text-muted">Cleaning premium</td><td class="number">+20%</td></tr>
+                    <tr><td class="pp-text-muted">Unique records</td><td class="number" id="osUnique">—</td></tr>
+                    <tr><td class="pp-text-muted">Rate</td><td class="number" id="osRate">$0.00 / record</td></tr>
+                    <tr style="font-weight:700;"><td>Total</td><td class="number money" id="osTotal">$0</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</section>
+
+<!-- Step 6: Download -->
+<section class="pp-step-pane" data-pane="6" style="display:none;">
+    <div class="pp-card" style="text-align:center; padding: 48px 32px;">
+        <div style="font-size: 56px; margin-bottom: 12px;">🎉</div>
+        <h2 class="pp-auth-title">Your file is ready!</h2>
+        <p class="pp-auth-sub">Payment confirmed. Your scrubbed list of unique records is ready to download.</p>
+
+        <div class="pp-price-card" style="text-align:left; max-width: 520px; margin: 24px auto;">
+            <div>
+                <div class="pp-price-label">Filename</div>
+                <div style="font-size: 18px; font-weight: 700; margin-top: 6px;" id="dlFilename">—</div>
+                <div class="pp-price-detail"><span id="dlRows">— records</span> · Link expires in 1 hour</div>
+            </div>
+            <a id="dlLink" href="#" class="pp-btn pp-btn-primary pp-btn-lg">Download .xlsx</a>
+        </div>
+
+        <div class="pp-divider"></div>
+        <div class="pp-flex" style="justify-content:center; gap: 12px;">
+            <a href="/scrub" class="pp-btn pp-btn-secondary">Scrub another list</a>
+            <a href="/dashboard" class="pp-btn pp-btn-ghost">Back to dashboard</a>
+        </div>
+    </div>
+</section>
+
+<script>
+const state = {
+    step: 1,
+    file: null,
+    clean: true,
+    job: null,
+    headers: [],
+    sampleRows: [],
+    suggested: {},
+    standardFields: [],
+};
+
+function goToStep(n) {
+    state.step = n;
+    document.querySelectorAll('.pp-step').forEach(s => {
+        const sn = parseInt(s.dataset.step, 10);
+        s.classList.toggle('active', sn === n);
+        s.classList.toggle('complete', sn < n);
+    });
+    document.querySelectorAll('.pp-step-pane').forEach(p => {
+        p.style.display = parseInt(p.dataset.pane, 10) === n ? '' : 'none';
+    });
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+// ── Step 1: file picker + multipart upload ───────────────────────────────
+
+const uploadZone = document.getElementById('uploadZone');
+const fileInput = document.getElementById('fileInput');
+const fileChosen = document.getElementById('fileChosen');
+
+function setFile(f) {
+    state.file = f;
+    if (!f) { fileChosen.innerHTML = ''; document.getElementById('step1Next').disabled = true; return; }
+    const sizeMB = (f.size / 1024 / 1024).toFixed(2);
+    fileChosen.innerHTML = `
+        <div class="pp-file-pill">
+            <span>📄</span>
+            <span class="pp-file-name">${f.name}</span>
+            <span class="pp-file-size">${sizeMB} MB</span>
+            <button onclick="clearFile()" aria-label="Remove">×</button>
+        </div>`;
+    document.getElementById('step1Next').disabled = false;
+}
+function clearFile() { fileInput.value = ''; setFile(null); }
+fileInput.addEventListener('change', e => setFile(e.target.files[0]));
+['dragenter','dragover'].forEach(ev => uploadZone.addEventListener(ev, e => { e.preventDefault(); uploadZone.classList.add('drag'); }));
+['dragleave','drop'].forEach(ev => uploadZone.addEventListener(ev, e => { e.preventDefault(); uploadZone.classList.remove('drag'); }));
+uploadZone.addEventListener('drop', e => {
+    if (e.dataTransfer.files.length) { fileInput.files = e.dataTransfer.files; setFile(e.dataTransfer.files[0]); }
+});
+
+const cleanToggle = document.getElementById('cleanToggle');
+function syncClean() { cleanToggle.classList.toggle('checked', state.clean); }
+cleanToggle.addEventListener('click', () => { state.clean = !state.clean; syncClean(); });
+syncClean();
+
+document.querySelectorAll('[data-prev]').forEach(b => b.addEventListener('click', () => goToStep(state.step - 1)));
+
+async function uploadFileToSpaces(file, initResp) {
+    const partSize = initResp.part_size;
+    const wrap = document.getElementById('uploadProgressWrap');
+    const bar = document.getElementById('uploadBar');
+    const pct = document.getElementById('uploadPct');
+    const label = document.getElementById('uploadLabel');
+    wrap.style.display = '';
+    label.textContent = `Uploading ${initResp.parts.length} part(s) to storage…`;
+
+    const collected = [];
+    for (let i = 0; i < initResp.parts.length; i++) {
+        const p = initResp.parts[i];
+        const start = i * partSize;
+        const end = Math.min(start + partSize, file.size);
+        const chunk = file.slice(start, end);
+        const resp = await fetch(p.url, { method: 'PUT', body: chunk });
+        if (!resp.ok) throw new Error(`Part ${p.PartNumber} upload failed (${resp.status})`);
+        const etag = resp.headers.get('ETag');
+        if (!etag) throw new Error(`Part ${p.PartNumber} missing ETag — Spaces CORS likely missing ExposeHeaders: ETag`);
+        collected.push({ PartNumber: p.PartNumber, ETag: etag.replace(/"/g, '') });
+        const done = (i + 1) / initResp.parts.length;
+        bar.style.width = (done * 100).toFixed(1) + '%';
+        pct.textContent = Math.round(done * 100) + '%';
+    }
+    return collected;
+}
+
+document.getElementById('step1Next').addEventListener('click', async () => {
+    if (!state.file) return;
+    const btn = document.getElementById('step1Next');
+    btn.disabled = true; const orig = btn.innerHTML; btn.textContent = 'Uploading…';
+    try {
+        const init = await gmFetch('/api/scrub-jobs/upload-init', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                filename: state.file.name,
+                size: state.file.size,
+                content_type: state.file.type || 'application/octet-stream',
+                cleaning: state.clean,
+            }),
+        });
+        state.job = { id: init.job_id };
+
+        const parts = await uploadFileToSpaces(state.file, init);
+
+        await gmFetch(`/api/scrub-jobs/${init.job_id}/upload-complete`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ parts }),
+        });
+
+        // Detect headers (server reads only first ~5 rows from S3)
+        const detect = await gmFetch(`/api/scrub-jobs/${init.job_id}/detect-headers`, { method: 'POST' });
+        state.headers = detect.headers;
+        state.sampleRows = detect.sample_rows;
+        state.suggested = detect.suggested_mapping;
+        state.standardFields = detect.standard_fields;
+
+        renderMappingTable();
+        goToStep(2);
+    } catch (e) {
+        alert('Upload failed: ' + e.message);
+    } finally {
+        btn.disabled = false; btn.innerHTML = orig;
+    }
+});
+
+// ── Step 2: mapping UI ───────────────────────────────────────────────────
+
+function renderMappingTable() {
+    const tbody = document.getElementById('mappingTbody');
+    const std = state.standardFields;
+    tbody.innerHTML = state.headers.map((h, i) => {
+        const sample = state.sampleRows.map(r => (r[i] || '')).filter(v => v !== '').slice(0, 3).join(', ');
+        const suggested = state.suggested[h] || '';
+        const stdOptions = std.map(s => {
+            const sel = (suggested === s) ? ' selected' : '';
+            return `<option value="${s}"${sel}>${s}</option>`;
+        }).join('');
+        const customSel = (!suggested) ? ' selected' : '';
+        return `
+            <tr data-row-index="${i}">
+                <td><strong>${escapeHtml(h)}</strong></td>
+                <td class="pp-text-sm pp-text-muted" style="max-width: 240px; overflow:hidden; text-overflow: ellipsis;">${escapeHtml(sample)}</td>
+                <td>
+                    <select class="pp-input map-target" style="padding: 6px 8px;">
+                        ${stdOptions}
+                        <option value="__custom__"${customSel}>Custom field…</option>
+                        <option value="__skip__">— Skip this column —</option>
+                    </select>
+                </td>
+                <td>
+                    <input class="pp-input map-custom" type="text" placeholder="e.g. car_model"
+                        value="${escapeHtml(suggested ? '' : suggestCustomName(h))}"
+                        style="padding: 6px 8px; ${suggested ? 'display:none;' : ''}">
+                </td>
+                <td style="text-align:center;">
+                    <input type="checkbox" class="map-skip">
+                </td>
+            </tr>`;
+    }).join('');
+
+    // Wire up: changing the target dropdown shows/hides the custom-name field
+    tbody.querySelectorAll('tr').forEach(tr => {
+        const sel = tr.querySelector('.map-target');
+        const custom = tr.querySelector('.map-custom');
+        const skip = tr.querySelector('.map-skip');
+        sel.addEventListener('change', () => {
+            const isCustom = sel.value === '__custom__';
+            const isSkip = sel.value === '__skip__';
+            custom.style.display = isCustom ? '' : 'none';
+            skip.checked = isSkip;
+        });
+        skip.addEventListener('change', () => {
+            if (skip.checked) sel.value = '__skip__';
+            else if (sel.value === '__skip__') sel.value = '__custom__';
+            const isCustom = sel.value === '__custom__';
+            custom.style.display = isCustom ? '' : 'none';
+        });
+    });
+}
+
+function suggestCustomName(header) {
+    // Lowercase + non-alphanum to underscore, used as a hint in the custom-name input.
+    return String(header || '').toLowerCase().trim().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
+}
+
+function escapeHtml(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    }[c]));
+}
+
+document.getElementById('step2Back').addEventListener('click', () => {
+    if (confirm('Discard this upload and start over?')) location.reload();
+});
+
+document.getElementById('step2Next').addEventListener('click', async () => {
+    const tbody = document.getElementById('mappingTbody');
+    const mappings = [];
+    const seenStandard = new Set();
+    let error = null;
+
+    tbody.querySelectorAll('tr').forEach(tr => {
+        if (error) return;
+        const i = parseInt(tr.dataset.rowIndex, 10);
+        const source = state.headers[i];
+        const sel = tr.querySelector('.map-target').value;
+        const custom = tr.querySelector('.map-custom').value.trim();
+        const skip = tr.querySelector('.map-skip').checked || sel === '__skip__';
+
+        if (skip) {
+            mappings.push({ source_header: source, column_index: i, target_field: '', is_standard: false, skip: true });
+            return;
+        }
+        if (sel === '__custom__') {
+            const name = custom || suggestCustomName(source);
+            if (!name) { error = `Give a custom name for "${source}" or skip it.`; return; }
+            mappings.push({ source_header: source, column_index: i, target_field: name, is_standard: false, skip: false });
+        } else {
+            if (seenStandard.has(sel)) { error = `Standard field "${sel}" is mapped twice. Pick a different target for "${source}".`; return; }
+            seenStandard.add(sel);
+            mappings.push({ source_header: source, column_index: i, target_field: sel, is_standard: true, skip: false });
+        }
+    });
+
+    const errEl = document.getElementById('mappingError');
+    if (error) { errEl.textContent = error; errEl.style.display = ''; return; }
+    errEl.style.display = 'none';
+
+    if (!seenStandard.has('email')) {
+        if (!confirm("No column is mapped to 'email'. Records without an email can't be matched against our data. Continue anyway?")) {
+            return;
+        }
+    }
+
+    const btn = document.getElementById('step2Next');
+    btn.disabled = true; const orig = btn.innerHTML; btn.textContent = 'Saving…';
+    try {
+        await gmFetch(`/api/scrub-jobs/${state.job.id}/mapping`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ mappings }),
+        });
+        goToStep(3);
+        pollJob();
+    } catch (e) {
+        alert('Could not save mapping: ' + e.message);
+    } finally {
+        btn.disabled = false; btn.innerHTML = orig;
+    }
+});
+
+// ── Step 3: poll job status ──────────────────────────────────────────────
+
+const STATUS_TO_STAGE = {
+    'importing': 'importing',
+    'validating': 'validating',
+    'scrubbing': 'scrubbing',
+    'priced': 'priced',
+    'awaiting_payment': 'priced',
+    'paid': 'priced',
+    'complete': 'priced',
+};
+
+async function pollJob() {
+    const bar = document.getElementById('progressBar');
+    const label = document.getElementById('progressLabel');
+    const pct = document.getElementById('progressPct');
+    const cleanStage = document.getElementById('cleanStage');
+    cleanStage.style.display = state.clean ? '' : 'none';
+
+    const stages = Array.from(document.querySelectorAll('.pp-progress-stage'))
+        .filter(el => el.style.display !== 'none');
+    const stageOrder = stages.map(el => el.dataset.stage);
+
+    let lastStatus = '';
+    while (true) {
+        let job;
+        try { job = await gmFetch(`/api/scrub-jobs/${state.job.id}`); }
+        catch (e) { await sleep(1500); continue; }
+
+        state.job = job;
+        if (job.status === 'failed') {
+            label.textContent = 'Failed: ' + (job.failure_reason || 'unknown error');
+            alert('Scrub failed: ' + (job.failure_reason || 'unknown error'));
+            return;
+        }
+
+        const targetStage = STATUS_TO_STAGE[job.status] || stageOrder[0];
+        if (job.status !== lastStatus) {
+            lastStatus = job.status;
+            stages.forEach(el => el.classList.remove('active', 'done'));
+            const idx = stageOrder.indexOf(targetStage);
+            stages.forEach((el, i) => {
+                if (i < idx) el.classList.add('done');
+                else if (i === idx) el.classList.add('active');
+            });
+            const stagePct = ((idx + 1) / stages.length) * 100;
+            bar.style.width = stagePct + '%';
+            pct.textContent = Math.round(stagePct) + '%';
+            const labelEl = stages[idx] && stages[idx].querySelector('.pp-stage-label');
+            label.textContent = labelEl ? labelEl.textContent + '…' : 'Processing…';
+        }
+
+        if (['priced', 'awaiting_payment', 'paid', 'complete'].includes(job.status)) {
+            stages.forEach(el => el.classList.replace('active', 'done'));
+            bar.style.width = '100%';
+            pct.textContent = '100%';
+            label.textContent = 'All done!';
+            renderResults(job);
+            goToStep(4);
+            return;
+        }
+        await sleep(1500);
+    }
+}
+
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+function renderResults(job) {
+    document.getElementById('rsUploaded').textContent = fmtNum(job.uploaded_count);
+    document.getElementById('rsUnique').textContent = fmtNum(job.unique_count);
+    document.getElementById('rsOverlap').textContent = fmtNum(job.overlap_count);
+    const pct = job.uploaded_count ? (job.unique_count / job.uploaded_count * 100).toFixed(1) : '0.0';
+    document.getElementById('rsUniquePct').textContent = pct + '% of your upload';
+    const cleanCard = document.getElementById('rsCleanCard');
+    if (job.cleaning_opted_in) {
+        cleanCard.style.display = '';
+        document.getElementById('rsClean').textContent = fmtNum(job.validated_count);
+        document.getElementById('rsCleanRemoved').textContent = `${fmtNum(job.invalid_count)} invalid / undeliverable removed`;
+    } else {
+        cleanCard.style.display = 'none';
+    }
+    document.getElementById('rsPrice').textContent = fmtMoney(job.price_cents);
+    document.getElementById('rsPriceDetail').textContent =
+        `${fmtNum(job.unique_count)} unique × $${job.rate_per_record.toFixed(4)}` +
+        (job.cleaning_opted_in ? ' (incl. 20% cleaning premium)' : '');
+
+    document.getElementById('osUploaded').textContent = fmtNum(job.uploaded_count);
+    document.getElementById('osUnique').textContent = fmtNum(job.unique_count);
+    document.getElementById('osRate').textContent = `$${job.rate_per_record.toFixed(4)} / record`;
+    document.getElementById('osTotal').textContent = fmtMoney(job.price_cents);
+    document.getElementById('osCleanRow').style.display = job.cleaning_opted_in ? '' : 'none';
+    document.getElementById('payAmount').textContent = fmtMoney(job.price_cents);
+}
+
+document.getElementById('step4Next').addEventListener('click', () => goToStep(5));
+
+document.getElementById('step5Pay').addEventListener('click', async e => {
+    const btn = e.currentTarget;
+    const orig = btn.innerHTML;
+    btn.disabled = true; btn.textContent = 'Processing payment…';
+    try {
+        const job = await gmFetch(`/api/scrub-jobs/${state.job.id}/pay`, { method: 'POST' });
+        const dl = await gmFetch(`/api/scrub-jobs/${job.id}/download-url`);
+        document.getElementById('dlFilename').textContent = job.result_filename || '—';
+        document.getElementById('dlRows').textContent = fmtNum(job.unique_count) + ' records';
+        document.getElementById('dlLink').href = dl.url;
+        goToStep(6);
+    } catch (e) {
+        alert('Payment failed: ' + e.message);
+    } finally {
+        btn.disabled = false; btn.innerHTML = orig;
+    }
+});
+</script>
+{% endblock %}

@@ -1,0 +1,414 @@
+{% extends "_base.html" %}
+{% block title %}Buy data — Gravitas Leads{% endblock %}
+
+{% block nav %}
+<a href="/dashboard" class="pp-nav-link">Dashboard</a>
+<a href="/jobs" class="pp-nav-link">Job History</a>
+<a href="#" class="pp-nav-link">Billing</a>
+<a href="/account" class="pp-nav-link">Account</a>
+{% endblock %}
+
+{% block content %}
+<div class="pp-page-header">
+    <div>
+        <a href="/dashboard" class="pp-text-sm pp-text-muted" style="display:inline-block; margin-bottom: 6px;">← Back to dashboard</a>
+        <h1 class="pp-page-title">Buy data</h1>
+        <p class="pp-page-sub">Pick a vertical, choose volume, pay, and download. No upload required.</p>
+    </div>
+</div>
+
+<div class="pp-stepper" id="stepper">
+    <div class="pp-step active" data-step="1"><span class="pp-step-dot">1</span><span class="pp-step-label">Pick a vertical</span></div>
+    <div class="pp-step-bar"></div>
+    <div class="pp-step" data-step="2"><span class="pp-step-dot">2</span><span class="pp-step-label">Choose volume</span></div>
+    <div class="pp-step-bar"></div>
+    <div class="pp-step" data-step="3"><span class="pp-step-dot">3</span><span class="pp-step-label">Payment</span></div>
+    <div class="pp-step-bar"></div>
+    <div class="pp-step" data-step="4"><span class="pp-step-dot">4</span><span class="pp-step-label">Download</span></div>
+</div>
+
+<!-- Step 1: Verticals -->
+<section class="pp-step-pane" data-pane="1">
+    <div class="pp-card">
+        <div class="pp-card-title">Pick the verticals you want data for</div>
+        <p class="pp-card-sub" style="margin-top:-8px;">Select one or more. You'll choose volume on the next step.</p>
+        <div class="pp-vert-grid" id="verticalsGrid"></div>
+
+        <div class="pp-divider"></div>
+        <div class="pp-flex-between">
+            <span class="pp-text-sm pp-text-muted" id="verticalCount">No verticals selected yet</span>
+            <button class="pp-btn pp-btn-primary pp-btn-lg" id="step1Next" disabled>Choose volume →</button>
+        </div>
+    </div>
+</section>
+
+<!-- Step 2: Volume -->
+<section class="pp-step-pane" data-pane="2" style="display:none;">
+    <div class="pp-grid-2">
+        <div class="pp-volume-card">
+            <div class="pp-card-title">How many records do you want?</div>
+            <p class="pp-card-sub" style="margin-top:-8px;">Slider for custom amounts, or pick a preset tier for the best rate.</p>
+
+            <div class="pp-volume-stats">
+                <div class="pp-volume-stat"><div class="label">Available</div><div class="value" id="volAvailable">—</div></div>
+                <div class="pp-volume-stat"><div class="label">Your selection</div><div class="value" id="volSelection">—</div></div>
+                <div class="pp-volume-stat"><div class="label">Rate / record</div><div class="value" id="volRate">—</div></div>
+            </div>
+
+            <div class="pp-slider-row">
+                <input type="range" class="pp-slider" id="volSlider" min="1000" max="100000" step="1000" value="10000">
+                <div class="pp-flex-between pp-mt-12 pp-text-sm pp-text-muted">
+                    <span>1,000</span>
+                    <span id="volMaxLabel">100,000</span>
+                </div>
+            </div>
+
+            <div class="pp-tier-grid" id="tierGrid"></div>
+
+            <div class="pp-divider"></div>
+            <div class="pp-flex-between">
+                <button class="pp-btn pp-btn-secondary" data-prev>← Back to verticals</button>
+                <button class="pp-btn pp-btn-primary pp-btn-lg" id="step2Next">Continue to payment →</button>
+            </div>
+        </div>
+
+        <div class="pp-card">
+            <div class="pp-card-title">Order preview</div>
+            <table class="pp-table" style="margin: -8px -8px;"><tbody id="orderPreviewRows"></tbody></table>
+            <div class="pp-divider"></div>
+            <div class="pp-flex-between" style="font-size: 15px;">
+                <span class="pp-text-muted">Subtotal</span>
+                <span style="font-weight: 600;" id="opSubtotal">$0</span>
+            </div>
+            <div class="pp-flex-between" id="opDiscountRow" style="font-size: 14px; margin-top: 6px; display:none;">
+                <span class="pp-text-muted">Volume discount</span>
+                <span style="color: var(--pp-success); font-weight: 600;" id="opDiscount">−$0</span>
+            </div>
+            <div class="pp-divider"></div>
+            <div class="pp-flex-between" style="font-size: 18px; font-weight: 800;">
+                <span>Total</span>
+                <span style="color: var(--pp-orange);" id="opTotal">$0</span>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- Step 3: Payment -->
+<section class="pp-step-pane" data-pane="3" style="display:none;">
+    <div class="pp-grid-2">
+        <div class="pp-card">
+            <div class="pp-card-title">Payment</div>
+            <p class="pp-card-sub" style="margin-top:-8px;">Secure card payment via Stripe. (Stub mode — accepting any input for now.)</p>
+
+            <div class="pp-form-row">
+                <label class="pp-label">Promo code</label>
+                <div class="pp-flex pp-gap-12">
+                    <input class="pp-input" id="promoInput" placeholder="Enter code (e.g. AUTO15)">
+                    <button class="pp-btn pp-btn-secondary" id="applyPromo" type="button">Apply</button>
+                </div>
+                <div class="pp-help" id="promoStatus"></div>
+            </div>
+
+            <div class="pp-form-row"><label class="pp-label">Card details</label><div class="pp-input" style="padding: 14px; color: var(--pp-text-light); font-family: monospace;">[Stripe Elements mount point]</div></div>
+            <div class="pp-auth-grid-2">
+                <div class="pp-form-row"><label class="pp-label">Cardholder name</label><input class="pp-input" type="text" placeholder="As on card"></div>
+                <div class="pp-form-row"><label class="pp-label">ZIP / Postal</label><input class="pp-input" type="text" placeholder="10001"></div>
+            </div>
+
+            <div class="pp-divider"></div>
+            <div class="pp-flex-between">
+                <button class="pp-btn pp-btn-secondary" data-prev>← Back to volume</button>
+                <button class="pp-btn pp-btn-primary pp-btn-lg" id="step3Pay">Pay <span id="payAmount">$0</span></button>
+            </div>
+        </div>
+
+        <div class="pp-card">
+            <div class="pp-card-title">Final summary</div>
+            <table class="pp-table" style="margin: -8px -8px;"><tbody id="finalSummaryRows"></tbody></table>
+            <div class="pp-divider"></div>
+            <div class="pp-flex-between" style="font-size: 18px; font-weight: 800;">
+                <span>Total</span>
+                <span style="color: var(--pp-orange);" id="finalTotal">$0</span>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- Step 4: Download -->
+<section class="pp-step-pane" data-pane="4" style="display:none;">
+    <div class="pp-card" style="text-align:center; padding: 48px 32px;">
+        <div style="font-size: 56px; margin-bottom: 12px;">🎉</div>
+        <h2 class="pp-auth-title">Your file is ready!</h2>
+        <p class="pp-auth-sub">Payment confirmed. Download your new records below.</p>
+
+        <div class="pp-price-card" style="text-align:left; max-width: 520px; margin: 24px auto;">
+            <div>
+                <div class="pp-price-label">Filename</div>
+                <div style="font-size: 18px; font-weight: 700; margin-top: 6px;" id="dlFilename">—</div>
+                <div class="pp-price-detail"><span id="dlRows">— records</span> · Expires in 30 days</div>
+            </div>
+            <a id="dlLink" href="#" class="pp-btn pp-btn-primary pp-btn-lg">Download .xlsx</a>
+        </div>
+
+        <div class="pp-divider"></div>
+        <div class="pp-flex" style="justify-content:center; gap: 12px;">
+            <a href="/buy" class="pp-btn pp-btn-secondary">Buy more data</a>
+            <a href="/dashboard" class="pp-btn pp-btn-ghost">Back to dashboard</a>
+        </div>
+    </div>
+</section>
+
+<script>
+const TIERS = [
+    { vol: 5000,   label: 'Standard' },
+    { vol: 10000,  label: '−5%' },
+    { vol: 25000,  label: '−10%', badge: 'Popular' },
+    { vol: 50000,  label: '−15%' },
+    { vol: 100000, label: '−20%', badge: 'Best rate' },
+];
+
+const state = {
+    step: 1,
+    verticals: [],
+    selected: new Set(),
+    subsel: {},
+    volume: 25000,
+    promo: '',
+    quote: null,
+    job: null,
+};
+
+function goToStep(n) {
+    state.step = n;
+    document.querySelectorAll('.pp-step').forEach(s => {
+        const sn = parseInt(s.dataset.step, 10);
+        s.classList.toggle('active', sn === n);
+        s.classList.toggle('complete', sn < n);
+    });
+    document.querySelectorAll('.pp-step-pane').forEach(p => {
+        p.style.display = parseInt(p.dataset.pane, 10) === n ? '' : 'none';
+    });
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+document.querySelectorAll('[data-prev]').forEach(b => b.addEventListener('click', () => goToStep(state.step - 1)));
+
+async function loadVerticals() {
+    state.verticals = await gmFetch('/api/verticals');
+    const grid = document.getElementById('verticalsGrid');
+    grid.innerHTML = state.verticals.map(v => `
+        <button type="button" class="pp-vert-card" data-vid="${v.id}">
+            <div class="pp-vert-icon">${v.icon || ''}</div>
+            <div class="pp-vert-name">${v.display_name}</div>
+            <div class="pp-vert-sub">${v.description || ''}</div>
+            <div class="pp-text-sm pp-text-muted" style="margin-top:6px;">
+                <strong>${fmtNum(v.available_records)}</strong> available · from <strong>$${Number(v.base_rate).toFixed(3)}</strong>/rec
+            </div>
+            <div class="pp-subcat-list" data-subwrap="${v.id}" style="display:none;">
+                ${(v.subcategories || []).length ? `<span class="pp-subcat-chip pp-subcat-all" data-sub-all="1">All</span>` : ''}
+                ${(v.subcategories || []).map(s => `<span class="pp-subcat-chip" data-sub="${s.id}">${s.name}</span>`).join('')}
+            </div>
+        </button>
+    `).join('');
+
+    grid.querySelectorAll('.pp-vert-card').forEach(card => {
+        card.addEventListener('click', async e => {
+            const chip = e.target.closest('.pp-subcat-chip');
+            const vid = parseInt(card.dataset.vid, 10);
+            if (chip) {
+                e.stopPropagation();
+                if (!state.selected.has(vid)) return;
+                const subWrap = card.querySelector(`[data-subwrap="${vid}"]`);
+                const allChip = subWrap.querySelector('.pp-subcat-all');
+                const subChips = subWrap.querySelectorAll('.pp-subcat-chip[data-sub]');
+                state.subsel[vid] = state.subsel[vid] || new Set();
+                if (chip.dataset.subAll) {
+                    const allSelected = subChips.length > 0 && state.subsel[vid].size === subChips.length;
+                    if (allSelected) {
+                        state.subsel[vid].clear();
+                        subChips.forEach(c => c.classList.remove('selected'));
+                        if (allChip) allChip.classList.remove('selected');
+                    } else {
+                        subChips.forEach(c => {
+                            state.subsel[vid].add(parseInt(c.dataset.sub, 10));
+                            c.classList.add('selected');
+                        });
+                        if (allChip) allChip.classList.add('selected');
+                    }
+                } else {
+                    const sid = parseInt(chip.dataset.sub, 10);
+                    if (state.subsel[vid].has(sid)) { state.subsel[vid].delete(sid); chip.classList.remove('selected'); }
+                    else { state.subsel[vid].add(sid); chip.classList.add('selected'); }
+                    if (allChip) allChip.classList.toggle('selected', state.subsel[vid].size === subChips.length);
+                }
+                updateVerticalCount();
+                return;
+            }
+            const subWrap = card.querySelector(`[data-subwrap="${vid}"]`);
+            if (state.selected.has(vid)) {
+                state.selected.delete(vid); delete state.subsel[vid];
+                card.classList.remove('selected'); subWrap.style.display = 'none';
+                subWrap.querySelectorAll('.pp-subcat-chip').forEach(c => c.classList.remove('selected'));
+            } else {
+                state.selected.add(vid);
+                card.classList.add('selected'); subWrap.style.display = 'flex';
+                // record the track in activity_log (fire-and-forget)
+                try { await gmFetch(`/api/verticals/${vid}/track`, { method: 'POST' }); } catch (e) {}
+            }
+            updateVerticalCount();
+        });
+    });
+    updateVerticalCount();
+}
+
+function updateVerticalCount() {
+    const count = state.selected.size;
+    const subCount = Object.values(state.subsel).reduce((s, set) => s + set.size, 0);
+    const el = document.getElementById('verticalCount');
+    el.textContent = count === 0 ? 'No verticals selected yet'
+        : `${count} vertical${count > 1 ? 's' : ''} selected${subCount > 0 ? ` · ${subCount} subcategor${subCount > 1 ? 'ies' : 'y'}` : ''}`;
+    document.getElementById('step1Next').disabled = count === 0;
+}
+
+document.getElementById('step1Next').addEventListener('click', () => { goToStep(2); setupVolume(); });
+
+function selectedVerticalsArr() {
+    return state.verticals.filter(v => state.selected.has(v.id));
+}
+
+function setupVolume() {
+    const totalAvail = selectedVerticalsArr().reduce((s, v) => s + (v.available_records || 0), 0);
+    const cap = Math.min(totalAvail, 100000);
+    const slider = document.getElementById('volSlider');
+    slider.min = 1000; slider.step = 1000;
+    slider.max = Math.max(1000, cap);
+    if (state.volume > cap) state.volume = cap;
+    if (state.volume < 1000) state.volume = 1000;
+    slider.value = state.volume;
+    document.getElementById('volMaxLabel').textContent = fmtNum(cap);
+    document.getElementById('volAvailable').textContent = fmtNum(totalAvail);
+
+    document.getElementById('tierGrid').innerHTML = TIERS.map(t => `
+        <button class="pp-tier ${t.vol === state.volume ? 'active' : ''}" data-volume="${t.vol}">
+            <div class="pp-tier-count">${fmtNum(t.vol)}</div>
+            <div class="pp-tier-rate">${t.label}</div>
+            ${t.badge ? `<span class="pp-badge">${t.badge}</span>` : ''}
+        </button>`).join('');
+    document.querySelectorAll('.pp-tier').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const v = parseInt(btn.dataset.volume, 10);
+            const cap = parseInt(slider.max, 10);
+            state.volume = Math.min(v, cap);
+            slider.value = state.volume;
+            syncVolumeUI();
+        });
+    });
+    syncVolumeUI();
+}
+
+const slider = document.getElementById('volSlider');
+slider.addEventListener('input', e => { state.volume = parseInt(e.target.value, 10); syncVolumeUI(); });
+
+async function syncVolumeUI() {
+    document.getElementById('volSelection').textContent = fmtNum(state.volume);
+    document.querySelectorAll('.pp-tier').forEach(t => {
+        t.classList.toggle('active', parseInt(t.dataset.volume, 10) === state.volume);
+    });
+    await refreshQuote();
+}
+
+async function refreshQuote() {
+    const sel = Array.from(state.selected).map(vid => ({
+        vertical_id: vid,
+        subcategory_ids: Array.from(state.subsel[vid] || []),
+    }));
+    if (sel.length === 0) return;
+    const quote = await gmFetch('/api/purchase-jobs/quote', {
+        method: 'POST',
+        body: { selected_verticals: sel, volume: state.volume, promo_code: state.promo },
+    });
+    state.quote = quote;
+
+    const avgBase = quote.rows.length ? quote.rows.reduce((s, r) => s + r.base_rate, 0) / quote.rows.length : 0;
+    const tier = (quote.tier_pct || 0) / 100;
+    const effRate = (avgBase * (1 - tier)).toFixed(4);
+    document.getElementById('volRate').textContent = `$${effRate}`;
+
+    const tbody = document.getElementById('orderPreviewRows');
+    tbody.innerHTML = quote.rows.map(r => `
+        <tr><td>${r.vertical_name}<div class="pp-text-sm pp-text-muted">${fmtNum(r.records)} records</div></td>
+            <td class="number money">${fmtMoney(r.line_cents)}</td></tr>`).join('');
+
+    document.getElementById('opSubtotal').textContent = fmtMoney(quote.subtotal_cents);
+    document.getElementById('opTotal').textContent = fmtMoney(quote.price_cents);
+    const dRow = document.getElementById('opDiscountRow');
+    if (quote.discount_cents > 0) {
+        dRow.style.display = '';
+        document.getElementById('opDiscount').textContent = '−' + fmtMoney(quote.discount_cents);
+    } else { dRow.style.display = 'none'; }
+}
+
+document.getElementById('step2Next').addEventListener('click', () => { renderFinal(); goToStep(3); });
+
+function renderFinal() {
+    const quote = state.quote;
+    if (!quote) return;
+    const tbody = document.getElementById('finalSummaryRows');
+    tbody.innerHTML = quote.rows.map(r => `
+        <tr><td class="pp-text-muted">${r.vertical_name}</td><td class="number">${fmtNum(r.records)} × $${r.base_rate.toFixed(3)}</td></tr>
+    `).join('') +
+        `<tr><td class="pp-text-muted">Subtotal</td><td class="number">${fmtMoney(quote.subtotal_cents)}</td></tr>` +
+        (quote.discount_cents > 0 ? `<tr><td class="pp-text-muted">Discount</td><td class="number" style="color: var(--pp-success);">−${fmtMoney(quote.discount_cents)}</td></tr>` : '');
+    document.getElementById('finalTotal').textContent = fmtMoney(quote.price_cents);
+    document.getElementById('payAmount').textContent = fmtMoney(quote.price_cents);
+}
+
+document.getElementById('applyPromo').addEventListener('click', async () => {
+    state.promo = (document.getElementById('promoInput').value || '').trim().toUpperCase();
+    const statusEl = document.getElementById('promoStatus');
+    try {
+        await refreshQuote();
+        if (state.quote.promo) {
+            statusEl.style.color = 'var(--pp-success)';
+            statusEl.textContent = `✓ Promo applied: −${fmtMoney(state.quote.promo_discount_cents)}`;
+        } else if (state.promo) {
+            statusEl.style.color = 'var(--pp-danger)';
+            statusEl.textContent = `"${state.promo}" is not a valid code.`;
+        } else {
+            statusEl.textContent = '';
+        }
+        renderFinal();
+    } catch (e) {
+        statusEl.style.color = 'var(--pp-danger)';
+        statusEl.textContent = e.message;
+    }
+});
+
+document.getElementById('step3Pay').addEventListener('click', async e => {
+    const btn = e.currentTarget;
+    const orig = btn.innerHTML;
+    btn.disabled = true; btn.textContent = 'Processing payment…';
+    try {
+        const sel = Array.from(state.selected).map(vid => ({
+            vertical_id: vid,
+            subcategory_ids: Array.from(state.subsel[vid] || []),
+        }));
+        const job = await gmFetch('/api/purchase-jobs', {
+            method: 'POST',
+            body: { selected_verticals: sel, volume: state.volume, promo_code: state.promo },
+        });
+        const completed = await gmFetch(`/api/purchase-jobs/${job.id}/pay`, { method: 'POST' });
+        state.job = completed;
+        document.getElementById('dlFilename').textContent = completed.result_filename || '—';
+        document.getElementById('dlRows').textContent = fmtNum(completed.volume) + ' records';
+        document.getElementById('dlLink').href = `/api/purchase-jobs/${completed.id}/download`;
+        goToStep(4);
+    } catch (e) {
+        alert('Payment failed: ' + e.message);
+    } finally {
+        btn.disabled = false; btn.innerHTML = orig;
+    }
+});
+
+document.addEventListener('DOMContentLoaded', loadVerticals);
+</script>
+{% endblock %}

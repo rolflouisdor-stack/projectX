@@ -1,0 +1,36 @@
+# Secrets — never commit
+.env
+.env.local
+.env.production
+
+# Bundled deps used only for local-no-venv dev. Production deploys install
+# from requirements.txt instead, so committing this large tree to git just
+# bloats clone time. Remove this line and commit lib/ ONLY if your prod
+# environment can't run pip and needs the wheel cache shipped with the repo.
+lib/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Claude Code local state
+.claude/
+
+# Local artifacts
+/tmp/
+gravitas_mailer_artifacts/
+
+# Tunnel logs
+cf_*.log

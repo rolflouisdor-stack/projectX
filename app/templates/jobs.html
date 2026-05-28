@@ -1,0 +1,76 @@
+{% extends "_base.html" %}
+{% block title %}Job History — Gravitas Leads{% endblock %}
+
+{% block nav %}
+<a href="/dashboard" class="pp-nav-link">Dashboard</a>
+<a href="/jobs" class="pp-nav-link active">Job History</a>
+<a href="#" class="pp-nav-link">Billing</a>
+<a href="/account" class="pp-nav-link">Account</a>
+{% endblock %}
+
+{% block content %}
+<div class="pp-page-header">
+    <div>
+        <h1 class="pp-page-title">Job History</h1>
+        <p class="pp-page-sub">Every scrub and purchase your company has run on Gravitas Leads.</p>
+    </div>
+</div>
+
+<div class="pp-card pp-mb-20" style="padding: 0; overflow: hidden;">
+    <div style="padding: 22px 24px 12px;"><h3 class="pp-card-title" style="margin: 0;">Purchases</h3></div>
+    <table class="pp-table">
+        <thead><tr><th>Date</th><th>Volume</th><th>Verticals</th><th class="number">Spent</th><th>Status</th><th></th></tr></thead>
+        <tbody id="purchaseBody"><tr><td colspan="6" style="text-align:center;color:#94a3b8;padding:20px;">Loading…</td></tr></tbody>
+    </table>
+</div>
+
+<div class="pp-card" style="padding: 0; overflow: hidden;">
+    <div style="padding: 22px 24px 12px;"><h3 class="pp-card-title" style="margin: 0;">Scrubs</h3></div>
+    <table class="pp-table">
+        <thead><tr><th>Date</th><th class="number">Uploaded</th><th class="number">Unique</th><th class="number">Spent</th><th>Status</th><th></th></tr></thead>
+        <tbody id="scrubBody"><tr><td colspan="6" style="text-align:center;color:#94a3b8;padding:20px;">Loading…</td></tr></tbody>
+    </table>
+</div>
+
+<script>
+async function loadJobs() {
+    const data = await gmFetch('/api/jobs');
+    const purchases = data.purchase_jobs || [];
+    const scrubs = data.scrub_jobs || [];
+
+    const pb = document.getElementById('purchaseBody');
+    pb.innerHTML = purchases.length === 0
+        ? `<tr><td colspan="6" style="text-align:center;color:#94a3b8;padding:20px;">No purchases yet.</td></tr>`
+        : purchases.map(p => {
+            const verts = (p.selected_verticals || []).map(s => s.vertical_name).join(', ');
+            const dl = p.status === 'complete'
+                ? `<a href="/api/purchase-jobs/${p.id}/download" class="pp-btn pp-btn-secondary pp-btn-sm">Download</a>` : '';
+            return `<tr>
+                <td>${(p.created_at || '').slice(0, 10)}</td>
+                <td>${fmtNum(p.volume)}</td>
+                <td>${verts || '—'}</td>
+                <td class="number money">${fmtMoney(p.price_cents)}</td>
+                <td><span class="pp-badge ${p.status === 'complete' ? 'pp-badge-success' : ''}">${p.status}</span></td>
+                <td>${dl}</td>
+            </tr>`;
+        }).join('');
+
+    const sb = document.getElementById('scrubBody');
+    sb.innerHTML = scrubs.length === 0
+        ? `<tr><td colspan="6" style="text-align:center;color:#94a3b8;padding:20px;">No scrubs yet.</td></tr>`
+        : scrubs.map(s => {
+            const dl = s.status === 'complete'
+                ? `<a href="/api/scrub-jobs/${s.id}/download" class="pp-btn pp-btn-secondary pp-btn-sm">Download</a>` : '';
+            return `<tr>
+                <td>${(s.created_at || '').slice(0, 10)}</td>
+                <td class="number">${fmtNum(s.uploaded_count)}</td>
+                <td class="number">${fmtNum(s.unique_count)}</td>
+                <td class="number money">${fmtMoney(s.price_cents)}</td>
+                <td><span class="pp-badge ${s.status === 'complete' ? 'pp-badge-success' : ''}">${s.status}</span></td>
+                <td>${dl}</td>
+            </tr>`;
+        }).join('');
+}
+document.addEventListener('DOMContentLoaded', loadJobs);
+</script>
+{% endblock %}

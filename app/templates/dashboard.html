@@ -1,0 +1,125 @@
+{% extends "_base.html" %}
+{% block title %}Dashboard — Gravitas Leads{% endblock %}
+
+{% block nav %}
+<a href="/dashboard" class="pp-nav-link active">Dashboard</a>
+<a href="/jobs" class="pp-nav-link">Job History</a>
+<a href="#" class="pp-nav-link">Billing</a>
+<a href="/account" class="pp-nav-link">Account</a>
+{% endblock %}
+
+{% block content %}
+
+<div id="promoBannerWrap"></div>
+
+<div class="pp-page-header" style="margin-top: 28px;">
+    <div>
+        <h1 class="pp-page-title">Welcome back, {{ partner.company_name }}</h1>
+        <p class="pp-page-sub">What are you here to do today?</p>
+    </div>
+</div>
+
+<div class="pp-intent-grid">
+    <a href="/scrub" class="pp-intent-card pp-intent-scrub">
+        <div class="pp-intent-icon">🧹</div>
+        <div class="pp-intent-kicker">Option 1</div>
+        <h2 class="pp-intent-title">Scrub my data</h2>
+        <p class="pp-intent-sub">Already have a list? Upload it and we'll clean, validate, and tell you which records are unique against our premium data.</p>
+        <ul class="pp-intent-bullets">
+            <li>Real-time email validation</li>
+            <li>De-duplication against our verticals</li>
+            <li>Pay only for unique records found</li>
+        </ul>
+        <span class="pp-intent-cta">Upload my list →</span>
+    </a>
+
+    <a href="/buy" class="pp-intent-card pp-intent-buy">
+        <div class="pp-intent-icon">🛒</div>
+        <div class="pp-intent-kicker">Option 2</div>
+        <h2 class="pp-intent-title">Buy data from us</h2>
+        <p class="pp-intent-sub">Need fresh leads? Pick a vertical, choose how much you want, and download a clean Excel file in minutes.</p>
+        <ul class="pp-intent-bullets">
+            <li>Five high-performing verticals</li>
+            <li>Tiered volume pricing</li>
+            <li>Instant download after payment</li>
+        </ul>
+        <span class="pp-intent-cta">Browse verticals →</span>
+    </a>
+</div>
+
+<div class="pp-grid-2" style="margin-top: 32px;">
+    <div class="pp-card">
+        <div class="pp-card-title">Your recent activity</div>
+        <table class="pp-table" style="margin: -8px -8px;">
+            <thead>
+                <tr><th>Date</th><th>Type</th><th class="number">Records</th><th class="number">Spent</th><th>Status</th></tr>
+            </thead>
+            <tbody id="recentRows">
+                <tr><td colspan="5" style="text-align:center;color:#94a3b8;padding:20px;">Loading…</td></tr>
+            </tbody>
+        </table>
+        <div class="pp-text-sm pp-text-muted pp-mt-12">
+            <a href="/jobs">View all jobs →</a>
+        </div>
+    </div>
+    <div class="pp-card">
+        <div class="pp-card-title">Total spent</div>
+        <div id="totalSpent" style="font-size: 36px; font-weight: 800; color: var(--pp-orange); letter-spacing: -.02em; line-height: 1;">—</div>
+        <div class="pp-text-sm pp-text-muted pp-mt-12">Across every scrub + purchase since you signed up.</div>
+        <div style="margin-top: 20px;">
+            <a href="/buy" class="pp-btn pp-btn-secondary">Buy more →</a>
+            <a href="/scrub" class="pp-btn pp-btn-secondary" style="margin-left: 8px;">Scrub a list →</a>
+        </div>
+    </div>
+</div>
+
+<script>
+async function loadPromo() {
+    try {
+        const b = await gmFetch('/api/promo-banner');
+        if (!b) return;
+        const html = `
+            <div class="pp-promo" id="promoBanner">
+                <div class="pp-promo-art">${b.icon || '🎉'}</div>
+                <div class="pp-promo-body">
+                    ${b.tag ? `<div class="pp-promo-tag">${b.tag}</div>` : ''}
+                    <h3 class="pp-promo-title">${b.title}</h3>
+                    ${b.body ? `<p class="pp-promo-sub">${b.body}</p>` : ''}
+                </div>
+                <div class="pp-promo-actions">
+                    ${b.cta_url ? `<a href="${b.cta_url}" class="pp-btn pp-btn-primary">${b.cta_label || 'Learn more'}</a>` : ''}
+                    <button class="pp-promo-close" onclick="document.getElementById('promoBanner').remove()" aria-label="Dismiss">×</button>
+                </div>
+            </div>`;
+        document.getElementById('promoBannerWrap').innerHTML = html;
+    } catch (e) { /* ignore */ }
+}
+
+async function loadSummary() {
+    try {
+        const s = await gmFetch('/api/dashboard/summary');
+        document.getElementById('totalSpent').textContent = fmtMoney(s.total_spent_cents);
+        const rows = (s.recent || []);
+        if (rows.length === 0) {
+            document.getElementById('recentRows').innerHTML =
+                `<tr><td colspan="5" style="text-align:center;color:#94a3b8;padding:20px;">No jobs yet — start with a scrub or a purchase.</td></tr>`;
+            return;
+        }
+        document.getElementById('recentRows').innerHTML = rows.map(r => `
+            <tr>
+                <td>${(r.date || '').slice(0, 10)}</td>
+                <td>${r.kind === 'scrub' ? 'Scrub' : 'Purchase'}</td>
+                <td class="number">${fmtNum(r.records)}</td>
+                <td class="number money">${fmtMoney(r.price_cents)}</td>
+                <td><span class="pp-badge ${r.status === 'complete' ? 'pp-badge-success' : ''}">${r.status}</span></td>
+            </tr>
+        `).join('');
+    } catch (e) {}
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    loadPromo();
+    loadSummary();
+});
+</script>
+{% endblock %}

@@ -1,0 +1,134 @@
+# DigitalOcean App Platform spec for the Mailer Portal.
+#
+# Either:
+#   1. Edit `github.repo` below, commit this file, then create the app from
+#      the App Platform UI ("Create App" → "Import from GitHub" → pick repo).
+#      App Platform reads .do/app.yaml automatically.
+#   2. Or, with doctl:
+#        doctl apps create --spec .do/app.yaml
+#
+# After creation, set the actual secret values in the App Platform UI under
+# Settings → App-Level Environment Variables (anything marked SECRET below
+# must be set; PUBLIC_BASE_URL must be set to the live URL DO assigns).
+name: gravitas-mailer
+region: nyc
+services:
+  - name: web
+    github:
+      repo: rolflouisdor-stack/projectX
+      branch: main
+      deploy_on_push: true
+
+    environment_slug: python
+    instance_size_slug: basic-xxs   # 512 MB, $5/mo — bump to basic-xs for prod load
+    instance_count: 1
+
+    # gunicorn entrypoint. PORT is injected by App Platform — do not hardcode.
+    run_command: gunicorn --worker-tmp-dir /dev/shm --bind 0.0.0.0:$PORT --workers 2 --timeout 60 run:app
+
+    http_port: 8080   # informational; the real port comes from $PORT
+    health_check:
+      http_path: /api/internal/health
+
+    envs:
+      - key: FLASK_ENV
+        scope: RUN_TIME
+        value: production
+      - key: SECRET_KEY
+        scope: RUN_TIME
+        type: SECRET   # set in UI: `openssl rand -hex 32`
+      - key: INTERNAL_API_KEY
+        scope: RUN_TIME
+        type: SECRET   # set in UI: `openssl rand -hex 32`
+      - key: PUBLIC_BASE_URL
+        scope: RUN_TIME
+        value: ${APP_URL}   # auto-populated by App Platform to the public URL
+      - key: CORS_ORIGINS
+        scope: RUN_TIME
+        value: ""           # add the CX3 Dashboard origin once it's deployed
+      - key: JWT_COOKIE_SECURE
+        scope: RUN_TIME
+        value: "true"
+      - key: STRIPE_ENABLED
+        scope: RUN_TIME
+        value: "false"   # flip to "true" once Phase 6 Stripe wiring lands
+      - key: STRIPE_PUBLISHABLE_KEY
+        scope: RUN_TIME
+        type: SECRET   # set in UI: pk_test_* first; pk_live_* when ready
+      - key: STRIPE_SECRET_KEY
+        scope: RUN_TIME
+        type: SECRET   # set in UI: sk_test_* / sk_live_*
+      - key: STRIPE_WEBHOOK_SECRET
+        scope: RUN_TIME
+        type: SECRET   # set in UI from Stripe Dashboard → Webhooks → endpoint
+      - key: EMAIL_VALIDATOR_ENABLED
+        scope: RUN_TIME
+        value: "false"
+      - key: ARTIFACT_DIR
+        scope: RUN_TIME
+        value: /tmp/gravitas_mailer_artifacts
+      # ─ Spaces (object storage for uploads + result xlsx) ───────────────
+      - key: S3_ENDPOINT_URL
+        scope: RUN_TIME
+        value: https://nyc3.digitaloceanspaces.com
+      - key: S3_REGION
+        scope: RUN_TIME
+        value: nyc3
+      - key: S3_BUCKET
+        scope: RUN_TIME
+        value: gravitas-mailer-prod   # set in UI per environment
+      - key: S3_ACCESS_KEY
+        scope: RUN_TIME
+        type: SECRET   # set in UI from Spaces → Access Keys
+      - key: S3_SECRET_KEY
+        scope: RUN_TIME
+        type: SECRET
+      # ─ Redis (RQ queue) ────────────────────────────────────────────────
+      # REDIS_URL is injected automatically when the Managed Redis below is
+      # attached to this component.
+      # DATABASE_URL is injected automatically when the managed MySQL below
+      # is attached. Do NOT set either manually here.
+
+  - name: worker
+    github:
+      repo: rolflouisdor-stack/projectX
+      branch: main
+      deploy_on_push: true
+    environment_slug: python
+    instance_size_slug: basic-xxs
+    instance_count: 1
+    # Long-running RQ worker that drains the file-import queue.
+    run_command: python -m app.jobs.run_worker
+    envs:
+      - key: FLASK_ENV
+        scope: RUN_TIME
+        value: production
+      - key: SECRET_KEY
+        scope: RUN_TIME
+        type: SECRET
+      - key: S3_ENDPOINT_URL
+        scope: RUN_TIME
+        value: https://nyc3.digitaloceanspaces.com
+      - key: S3_REGION
+        scope: RUN_TIME
+        value: nyc3
+      - key: S3_BUCKET
+        scope: RUN_TIME
+        value: gravitas-mailer-prod
+      - key: S3_ACCESS_KEY
+        scope: RUN_TIME
+        type: SECRET
+      - key: S3_SECRET_KEY
+        scope: RUN_TIME
+        type: SECRET
+
+databases:
+  - name: mailer-db
+    engine: MYSQL
+    version: "8"
+    production: false   # set true + bump cluster_size when going live
+    cluster_name: gravitas-mailer-db
+  - name: mailer-redis
+    engine: REDIS
+    version: "7"
+    production: false   # set true when going live

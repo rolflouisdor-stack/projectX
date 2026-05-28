@@ -1,0 +1,52 @@
+{% extends "_base.html" %}
+{% block title %}Sign in — Gravitas Leads{% endblock %}
+
+{% block content %}
+<div class="pp-auth-wrap">
+    <div class="pp-auth-card">
+        <h1 class="pp-auth-title">Welcome back</h1>
+        <p class="pp-auth-sub">Sign in to your Gravitas Leads Mailer account.</p>
+
+        <form id="loginForm">
+            <div class="pp-form-row">
+                <label class="pp-label" for="email">Work email</label>
+                <input class="pp-input" type="email" id="email" name="email" placeholder="you@company.com" required>
+            </div>
+            <div class="pp-form-row">
+                <div class="pp-flex-between pp-mb-12">
+                    <label class="pp-label" for="password" style="margin:0;">Password</label>
+                    <a href="#" class="pp-text-sm">Forgot?</a>
+                </div>
+                <input class="pp-input" type="password" id="password" name="password" placeholder="••••••••" required>
+            </div>
+            <button type="submit" class="pp-btn pp-btn-primary pp-btn-block pp-btn-lg">Sign in</button>
+            <div class="pp-error" id="loginError" style="display:none;margin-top:10px;text-align:center;"></div>
+        </form>
+
+        <div class="pp-auth-footer">
+            New to Gravitas Leads? <a href="/signup">Create a Mailer account</a>
+        </div>
+    </div>
+</div>
+
+<script>
+document.getElementById('loginForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const errEl = document.getElementById('loginError');
+    errEl.style.display = 'none';
+    try {
+        await gmFetch('/api/auth/login', {
+            method: 'POST',
+            body: {
+                email: document.getElementById('email').value,
+                password: document.getElementById('password').value,
+            },
+        });
+        window.location.href = '/dashboard';
+    } catch (e) {
+        errEl.textContent = e.message;
+        errEl.style.display = 'block';
+    }
+});
+</script>
+{% endblock %}
