@@ -83,12 +83,17 @@ services:
       - key: S3_SECRET_KEY
         scope: RUN_TIME
         type: SECRET
-      # ─ Redis (RQ queue) ────────────────────────────────────────────────
-      # REDIS_URL is injected automatically when the Managed Redis below is
-      # attached to this component.
-      # DATABASE_URL is injected automatically when the managed MySQL below
-      # is attached. Do NOT set either manually here.
+      # ─ DB + queue connection strings, bound from the attached managed
+      #   clusters. App Platform does NOT auto-inject these names — the app
+      #   normalizes the mysql:// URL to mysql+pymysql:// at boot.
+      - key: DATABASE_URL
+        scope: RUN_TIME
+        value: ${mailer-db.DATABASE_URL}
+      - key: REDIS_URL
+        scope: RUN_TIME
+        value: ${mailer-redis.DATABASE_URL}
 
+workers:
   - name: worker
     github:
       repo: rolflouisdor-stack/projectX
@@ -121,14 +126,21 @@ services:
       - key: S3_SECRET_KEY
         scope: RUN_TIME
         type: SECRET
+      - key: DATABASE_URL
+        scope: RUN_TIME
+        value: ${mailer-db.DATABASE_URL}
+      - key: REDIS_URL
+        scope: RUN_TIME
+        value: ${mailer-redis.DATABASE_URL}
 
 databases:
   - name: mailer-db
     engine: MYSQL
-    version: "8"
-    production: false   # set true + bump cluster_size when going live
+    version: "8.4"
+    production: true   # App Platform dev DBs are Postgres-only; MySQL must be a managed cluster (~$15/mo)
     cluster_name: gravitas-mailer-db
   - name: mailer-redis
-    engine: REDIS
-    version: "7"
-    production: false   # set true when going live
+    engine: VALKEY
+    version: "8"
+    production: true   # managed Valkey cluster (~$15/mo)
+    cluster_name: gravitas-mailer-redis

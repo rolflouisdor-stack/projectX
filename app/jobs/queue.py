@@ -34,7 +34,16 @@ def get_connection():
     global _redis_conn
     if _redis_conn is None:
         import redis
-        _redis_conn = redis.from_url(_redis_url())
+        url = _redis_url()
+        kwargs = {}
+        if url.startswith('rediss://'):
+            # DO managed Valkey presents a cert signed by DO's private CA, not in
+            # the system trust store, so default verification fails. Skip cert
+            # verification (the connection is still TLS-encrypted). Harden with
+            # the DO CA cert later if stricter verification is required.
+            kwargs['ssl_cert_reqs'] = 'none'
+            kwargs['ssl_check_hostname'] = False
+        _redis_conn = redis.from_url(url, **kwargs)
     return _redis_conn
 
 
