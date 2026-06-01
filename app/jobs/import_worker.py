@@ -15,8 +15,9 @@ Status writes are committed in batches so the web process polling
 /api/scrub-jobs/{id} sees real progress.
 """
 import csv
-import io
 import logging
+import os
+import tempfile
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
@@ -52,30 +53,33 @@ def _str(v, limit=None):
     return s or None
 
 
-def _row_iter_csv(stream, delimiter):
-    """Yield rows from a CSV/TSV/pipe stream (header already consumed)."""
-    # The stream from boto3 is bytes; csv needs text. Wrap with TextIOWrapper.
-    text = io.TextIOWrapper(stream, encoding='utf-8', errors='replace', newline='')
-    reader = csv.reader(text, delimiter=delimiter or ',')
+def _row_iter_csv(path, delimiter):
+    """Yield data rows from a CSV/TSV/pipe file on local disk (header skipped)."""
+    f = open(path, 'r', encoding='utf-8', errors='replace', newline='')
+    reader = csv.reader(f, delimiter=delimiter or ',')
     next(reader, None)   # skip header row
-    for row in reader:
-        yield row
+    try:
+        for row in reader:
+            yield row
+    finally:
+        f.close()
 
 
-def _row_iter_xlsx(stream):
-    """Yield rows from an xlsx. openpyxl needs the whole bytes; we accept
-    that and stream rows from the loaded workbook."""
+def _row_iter_xlsx(path):
+    """Yield data rows from an xlsx file on local disk. openpyxl reads the zip
+    directly off the path in read_only mode — no full-file buffer in memory."""
     from openpyxl import load_workbook
-    raw = stream.read()
-    wb = load_workbook(io.BytesIO(raw), read_only=True, data_only=True)
+    wb = load_workbook(path, read_only=True, data_only=True)
     ws = wb[wb.sheetnames[0]]
     header_seen = False
-    for row in ws.iter_rows(values_only=True):
-        if not header_seen:
-            header_seen = True
-            continue
-        yield list(row)
-    wb.close()
+    try:
+        for row in ws.iter_rows(values_only=True):
+            if not header_seen:
+                header_seen = True
+                continue
+            yield list(row)
+    finally:
+        wb.close()
 
 
 # Per-standard-field length caps mirror the ScrubJobRecord columns.
@@ -108,14 +112,28 @@ def _build_record(row, mappings, scrub_job_id, company_id, row_index):
     return std, extras
 
 
-def _stream_file(job):
-    """Open the upload from Spaces; return an iterator over data rows."""
+def _download_upload(job):
+    """Pull the uploaded file from Spaces down to a local temp file and return
+    its path. We download in full *before* parsing rather than streaming a
+    GetObject body through the parse loop: holding one GetObject connection open
+    for the whole parse+insert keeps the socket idle between batch commits long
+    enough that Spaces drops it mid-stream (IncompleteRead) on large files. A
+    fast continuous managed download, then parse-from-disk, decouples network
+    I/O from the slow DB work. Caller is responsible for deleting the path."""
     from app.services import storage
-    body = storage.get_object_stream(job.s3_key)
+    suffix = os.path.splitext(job.original_filename or job.s3_key or '')[1]
+    fd, path = tempfile.mkstemp(prefix=f'scrub_{job.id}_', suffix=suffix)
+    os.close(fd)
+    storage.download_to_file(job.s3_key, path)
+    return path
+
+
+def _row_iter_for(path, job):
+    """Pick the right row iterator for a downloaded upload on local disk."""
     name = (job.original_filename or job.s3_key or '').lower()
     if name.endswith('.xlsx'):
-        return _row_iter_xlsx(body), body
-    return _row_iter_csv(body, job.delimiter or ','), body
+        return _row_iter_xlsx(path)
+    return _row_iter_csv(path, job.delimiter or ',')
 
 
 def run_import(scrub_job_id: int):
@@ -145,8 +163,9 @@ def run_import(scrub_job_id: int):
             if not mappings:
                 raise RuntimeError("no field mappings — cannot import without them")
 
-            row_iter, body = _stream_file(job)
+            tmp_path = _download_upload(job)
             try:
+                row_iter = _row_iter_for(tmp_path, job)
                 batch_records = []
                 batch_extras_per_record = []   # one list per record in batch
                 row_index = 0
@@ -182,8 +201,8 @@ def run_import(scrub_job_id: int):
                 db.commit()
             finally:
                 try:
-                    body.close()
-                except Exception:
+                    os.remove(tmp_path)
+                except OSError:
                     pass
 
             # Hand off to the (stub) scrub engine to bucket records + price

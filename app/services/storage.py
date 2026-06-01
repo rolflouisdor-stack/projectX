@@ -149,8 +149,27 @@ def put_object(key: str, body: bytes, content_type: str = 'application/octet-str
 
 
 def get_object_stream(key: str):
-    """Open a streaming body for reading. Caller is responsible for closing."""
+    """Open a streaming body for reading. Caller is responsible for closing.
+
+    Only safe for *fast, continuous* reads (e.g. the first 64 KB for header
+    sniffing). Do NOT hold this body open across slow work like row-by-row
+    parsing + batched DB commits: Spaces drops a half-consumed GetObject
+    connection mid-stream (IncompleteRead). For that, use download_to_file().
+    """
     return get_client().get_object(Bucket=_config()['bucket'], Key=key)['Body']
+
+
+def download_to_file(key: str, dest_path: str) -> None:
+    """Download an object to a local path via boto3's managed transfer.
+
+    Uses TransferManager (ranged, multipart, automatically-retried GETs)
+    instead of a single long-lived GetObject body. This is the robust way to
+    pull a large object before processing it: a single streamed GetObject
+    consumed slowly — e.g. while we parse a 70 MB CSV and commit to MySQL batch
+    by batch — gets dropped mid-stream by Spaces with `IncompleteRead`. Pull the
+    bytes down fast and continuously, then parse from disk.
+    """
+    get_client().download_file(_config()['bucket'], key, dest_path)
 
 
 def head_object(key: str) -> dict:

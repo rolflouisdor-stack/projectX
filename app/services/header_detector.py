@@ -21,7 +21,9 @@ Heuristics only; the user confirms or overrides everything in the UI.
 import csv
 import io
 import logging
+import os
 import re
+import tempfile
 from typing import Optional
 
 from openpyxl import load_workbook
@@ -99,16 +101,14 @@ def suggest_mapping(headers: list) -> dict:
     return out
 
 
-def _detect_xlsx_headers(stream) -> dict:
-    """Read only enough of an xlsx to capture headers + first SAMPLE_ROWS rows.
+def _detect_xlsx_headers(path) -> dict:
+    """Read only enough of an xlsx on local disk to capture headers + first
+    SAMPLE_ROWS rows.
 
-    openpyxl(read_only=True) iterates without loading the full sheet.
+    openpyxl(read_only=True) iterates without loading the full sheet, and reads
+    the zip directly off the path so we never buffer the whole file in memory.
     """
-    # openpyxl needs a file-like with seek support; buffer just the bytes we
-    # streamed so far. xlsx is a zip — we can't reasonably partial-read it
-    # the way we can with CSV, so we accept the bandwidth cost here.
-    raw = stream.read()
-    wb = load_workbook(io.BytesIO(raw), read_only=True, data_only=True)
+    wb = load_workbook(path, read_only=True, data_only=True)
     ws = wb[wb.sheetnames[0]]
     headers, sample_rows = [], []
     for i, row in enumerate(ws.iter_rows(values_only=True)):
@@ -159,23 +159,33 @@ def _detect_delimited_headers(sample_text: str) -> dict:
 def detect_from_s3(key: str, filename: Optional[str] = None) -> dict:
     """Read a small head of the file from Spaces, sniff format, return mapping.
 
-    XLSX: needs the whole file (zip format), so we download it in full.
+    XLSX: needs the whole file (zip format), so we download it in full to a
+          temp file (robust managed transfer; openpyxl reads it off disk).
           For 100+ MB xlsx this is slow — recommend users send CSV/TSV when
-          possible. We still cap memory by streaming into a BytesIO.
+          possible.
     CSV/TSV/TXT: only the first 64 KB is read.
     """
     name = (filename or key).lower()
 
-    body = storage.get_object_stream(key)
-    try:
-        if name.endswith('.xlsx'):
-            result = _detect_xlsx_headers(body)
-        else:
+    if name.endswith('.xlsx'):
+        fd, path = tempfile.mkstemp(suffix='.xlsx')
+        os.close(fd)
+        try:
+            storage.download_to_file(key, path)
+            result = _detect_xlsx_headers(path)
+        finally:
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+    else:
+        body = storage.get_object_stream(key)
+        try:
             chunk = body.read(SAMPLE_BYTES_FOR_SNIFF)
             text = chunk.decode('utf-8', errors='replace')
             result = _detect_delimited_headers(text)
-    finally:
-        body.close()
+        finally:
+            body.close()
 
     result['suggested_mapping'] = suggest_mapping(result['headers'])
     return result
