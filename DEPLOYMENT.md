@@ -4,6 +4,36 @@
 
 > Research basis: DigitalOcean official Flask App Platform tutorial + sample app + community guides (sources listed at bottom). Not memory.
 
+> **🟢 Status (2026-06-01):** App is **live in production** at `https://mailer.gravitasleads.io`. App ID `3fb2e338-db24-45ad-8965-e01a1e17a908`. Current operational state is in `continueContext.md`. This guide is the reference; the section below captures real-world deviations from the theoretical recipe.
+
+---
+
+## 0. Real-world learnings (from the actual deploy, supersede the theoretical steps below)
+
+These are things that the original guide missed, got wrong, or didn't anticipate. Read these before following §4 verbatim.
+
+- **The control panel does NOT auto-read `.do/app.yaml`.** The "Create App → import from GitHub" UI flow uses buildpack autodetection — it does *not* pre-fill components/env vars/databases from your spec. **Use `doctl apps create --spec .do/app.yaml`** (the §5 doctl path) instead, otherwise you'll spend hours hand-configuring 18 env vars and missing the database bindings.
+- **`doctl apps update --spec` silently empties per-component SECRET env values.** After every spec apply, immediately re-paste them in the UI on every component. App-level env vars are slightly more resilient — move shared secrets up there if possible.
+- **App Platform "dev databases" (the free, app-bundled ones) only support PostgreSQL.** MySQL and Valkey/Redis must be **pre-created managed clusters** (separate billing, ~$15/mo each), and attached by `cluster_name` in the spec. The spec does NOT auto-create them — `cluster_name: foo` with `production: true` and no existing cluster errors with "database cluster was not found."
+- **DO Managed Redis is region-restricted; use Valkey.** Creating a `--engine redis` cluster fails with `region 'nyc1' is not valid` in many regions now. Valkey (Redis-protocol-compatible fork) works everywhere. The spec accepts `engine: VALKEY`. `redis-py` and RQ work unchanged against it.
+- **App Platform does NOT auto-inject `DATABASE_URL`/`REDIS_URL`** (the spec comments in earlier revisions claimed otherwise — they were wrong). You **must** explicitly bind them in each component's env list:
+  ```yaml
+  - key: DATABASE_URL
+    value: ${mailer-db.DATABASE_URL}
+  - key: REDIS_URL
+    value: ${mailer-redis.DATABASE_URL}
+  ```
+- **DO Managed MySQL hands you a `mysql://…?ssl-mode=REQUIRED` URL** which SQLAlchemy routes to the *uninstalled* `mysqlclient` driver, and PyMySQL doesn't understand the `ssl-mode` query param. **The app boot will crash** without a fix. Solution lives in `app/extensions.py:_prepare_db_url()` — it rewrites the scheme to `mysql+pymysql://`, strips the unknown query, and attaches a no-verify TLS context (DO MySQL requires SSL but uses a private CA). Local dev URLs pass through untouched.
+- **DO Managed Valkey is `rediss://` with a private-CA cert** — `redis-py` rejects it by default. `app/jobs/queue.py` sets `ssl_cert_reqs='none'` for `rediss://` URLs.
+- **The worker is a separate component and goes under `workers:`, NOT `services:`.** Putting it under `services:` causes a `/` route collision with `web` and the spec validates with "rule matching path prefix '/' already in use." Workers don't have HTTP routes.
+- **Spaces granular access keys: the secret is shown once.** If anyone other than the eventual user creates the key, ensure they copy/relay the secret immediately or the key is useless. (Bit us on day one.)
+- **`SignatureDoesNotMatch`** from Spaces = wrong/truncated/mistyped S3 secret. **`S3 credentials are not set`** = empty creds on that component. These are different errors with different fixes.
+- **DO's Spaces CORS UI cannot set `ExposeHeaders`** — but the multipart upload flow needs the browser to read each part's `ETag`, so `ExposeHeaders: ['ETag']` is **required**. Set CORS via the S3 API instead — the repo ships `scripts/set_spaces_cors.py` for this.
+- **doctl logs limitation:** `doctl apps logs $APP_ID --type run` only works against an ACTIVE deployment. For an ERRORED deployment it returns `cannot get running logs … in phase final_cleanup`. Fall back to the DO web UI (App → Activity → the deployment → Runtime Logs).
+- **Custom domain via the spec:** add a top-level `domains:` block with `domain: subdomain.example.com`, `type: PRIMARY`, `zone: example.com`. DO auto-creates DNS when the zone is in DO Networking and issues Let's Encrypt automatically. Don't forget to change `PUBLIC_BASE_URL` from `${APP_URL}` to the new domain in the same spec apply.
+- **Permission gates:** creating Spaces access keys, creating an App, attaching managed DBs, setting env vars, attaching domains — all require **Owner**-level team permission. A Member-role user will silently see missing buttons (Spaces "Create Access Key" disappears) and `doctl` will fail. Get elevated to Owner before starting.
+- **Costs to plan for:** App ~$5–12/mo + worker ~$5/mo + Managed MySQL ~$15/mo + Managed Valkey ~$15/mo + Spaces ~$5/mo ≈ **$45–50/mo all-in** for the smallest production-grade footprint. Postgres dev DB would save the MySQL $15; skipping the worker (deferring uploads) saves the Valkey + worker $20. We went full.
+
 ---
 
 ## TL;DR

@@ -441,9 +441,9 @@ document.getElementById('step2Next').addEventListener('click', async () => {
     errEl.style.display = 'none';
 
     if (!seenStandard.has('email')) {
-        if (!confirm("No column is mapped to 'email'. Records without an email can't be matched against our data. Continue anyway?")) {
-            return;
-        }
+        errEl.textContent = "At least one column must be mapped to 'Email'. This is an email-scrub service — without an email column there's nothing to scrub.";
+        errEl.style.display = '';
+        return;
     }
 
     const btn = document.getElementById('step2Next');

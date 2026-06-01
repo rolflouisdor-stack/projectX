@@ -305,6 +305,14 @@ def scrub_save_mapping(job_id):
             skip=skip,
         ))
 
+    if 'email' not in seen_standard:
+        return jsonify({
+            'error': 'At least one column must be mapped to the standard "Email" field. '
+                     'This is an email-scrub service — without an email column there is '
+                     'nothing to scrub.',
+            'code': 'missing_email_mapping',
+        }), 400
+
     job.status = 'importing'
     db.commit()
 

@@ -12,6 +12,10 @@
 # must be set; PUBLIC_BASE_URL must be set to the live URL DO assigns).
 name: gravitas-mailer
 region: nyc
+domains:
+  - domain: mailer.gravitasleads.io
+    type: PRIMARY
+    zone: gravitasleads.io
 services:
   - name: web
     github:
@@ -42,7 +46,7 @@ services:
         type: SECRET   # set in UI: `openssl rand -hex 32`
       - key: PUBLIC_BASE_URL
         scope: RUN_TIME
-        value: ${APP_URL}   # auto-populated by App Platform to the public URL
+        value: https://mailer.gravitasleads.io   # custom domain attached via the domains: block above
       - key: CORS_ORIGINS
         scope: RUN_TIME
         value: ""           # add the CX3 Dashboard origin once it's deployed

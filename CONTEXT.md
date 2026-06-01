@@ -9,108 +9,31 @@
 
 ---
 
-## 🔖 RESUME HERE — paused 2026-05-28 eve, resume 2026-05-29 ~9:00 AM
+## 🔖 RESUME HERE — updated 2026-06-01, Phase 5 closed
 
-**The big picture:** mid-deployment sprint. Phases 0–3 **done**. **Phase 4 in progress and BLOCKED on a failed first deploy** — the app's first deployment ERRORED at boot (9/11, 1 error). We were about to read the runtime traceback when we paused.
-
-### ⏭️ FIRST THING TO DO ON RESUME
-The first DO deploy (deployment ID `e2fcae5d-045d-4452-8131-a9aad97b3adb`) **errored at runtime boot**, not build (build succeeded). `doctl apps logs` CANNOT fetch logs once a deployment is in `final_cleanup` phase ("cannot get running logs … in phase final_cleanup"). **Get the traceback from the DO web UI instead:** cloud.digitalocean.com → Apps → gravitas-mailer → Activity → the failed deployment → **Runtime Logs** (and Deploy Logs), for both `web` and `worker` components. That traceback tells us the boot crash. Ruled out already: the `/api/internal/health` route is ungated and returns 200, so empty secrets don't fail the health check. The crash is a **boot-time connection** issue — most likely MySQL TLS (despite the `_prepare_db_url` fix) or the worker's Valkey/`rediss://` cert verification. Once we see the traceback, fix → redeploy (`doctl apps create-deployment $APP_ID`) → then 4E/4F/4G below.
-- `APP_ID=3fb2e338-db24-45ad-8965-e01a1e17a908`
-- If redis-py rejects Valkey's TLS cert: append `?ssl_cert_reqs=none` to the bound `REDIS_URL` in the spec, or set it in `app/jobs/queue.py`'s `redis.from_url(...)`.
-- Alternative to UI for fresh logs: trigger a new deployment and `doctl apps logs $APP_ID web --type run --follow` while it's live (catches the crash before final_cleanup).
-
-### Git on this Mac — IMPORTANT recurring gotcha
-JumpCloud (or some TCC/PPPC privacy profile) blocks git metadata writes anywhere under `/Users/`. IT said they see no policy; confirmed it fails in plain Apple Terminal with BOTH Homebrew and (untested) git, EPERM on `.git/config`. **Working setup:** git metadata lives in `/tmp/mailer-git-meta` via env vars, work-tree stays at `~/Desktop/mailer`:
-```bash
-export GIT_DIR=/tmp/mailer-git-meta
-export GIT_WORK_TREE=/Users/rolf.louisdor/Desktop/mailer
-git <command>   # uses the exports automatically
-```
-**`/tmp` is wiped on reboot** → after any reboot, the local git metadata is gone (GitHub repo is safe). To restore: re-create GIT_DIR and `git init` + re-add remote, or get IT to lift the policy so we can `git clone` to a normal location. Auth is via `gh` (installed 2026-05-28, `gh auth login` web flow, credentials in Keychain). Persistent fix still pending IT's diagnostic. See [[jumpcloud-git-block]].
-
-### Git on this Mac — IMPORTANT recurring gotcha
-JumpCloud (or some TCC/PPPC privacy profile) blocks git metadata writes anywhere under `/Users/`. IT said they see no policy; confirmed it fails in plain Apple Terminal with BOTH Homebrew and (untested) git, EPERM on `.git/config`. **Working setup:** git metadata lives in `/tmp/mailer-git-meta` via env vars, work-tree stays at `~/Desktop/mailer`:
-```bash
-export GIT_DIR=/tmp/mailer-git-meta
-export GIT_WORK_TREE=/Users/rolf.louisdor/Desktop/mailer
-git <command>   # uses the exports automatically
-```
-**`/tmp` is wiped on reboot** → after any reboot, the local git metadata is gone (GitHub repo is safe). To restore: re-create GIT_DIR and `git init` + re-add remote, or get IT to lift the policy so we can `git clone` to a normal location. Auth is via `gh` (installed 2026-05-28, `gh auth login` web flow, credentials in Keychain). Persistent fix still pending IT's diagnostic. See [[jumpcloud-git-block]].
-
-### Where we are in the deployment plan
-
-The plan is in 8 phases (full text in conversation transcript). Status:
+**The big picture:** **The app is LIVE in production at https://mailer.gravitasleads.io.** Phases 0–5 done; one application bug open; Phase 6 (Stripe) is the next major workstream. **For all current operational detail, open `continueContext.md`** — that file is the rolling resume doc and is kept up-to-date. This block is a one-glance summary.
 
 | Phase | What | Status |
 |---|---|---|
-| 0 | Pre-push hygiene (README, `.do/app.yaml` repo, CI workflow, `.gitignore` `.claude/`) | ✅ done |
-| 1 | First GitHub push to `rolflouisdor-stack/projectX` | ✅ done (via /tmp GIT_DIR workaround + gh auth) |
-| 2 | DigitalOcean account + add `gravitasleads.io` in DO Networking + point `name.com` nameservers to `ns1/2/3.digitalocean.com` | ✅ done (DNS propagated, dig returns DO nameservers) |
-| 3 | Routing decided: **subdomains** (`mailer.`, `sources.`, `dashboard.`, `www.gravitasleads.io`) | ✅ decided |
-| 4 | Spin up mailer App on DO via doctl + spec | ⏳ IN PROGRESS — app created (ID `3fb2e338-db24-45ad-8965-e01a1e17a908`); **first deploy ERRORED at boot** — diagnosing (see top) |
+| 0 | Pre-push hygiene | ✅ |
+| 1 | First GitHub push to `rolflouisdor-stack/projectX` | ✅ |
+| 2 | DigitalOcean account + DNS for `gravitasleads.io` | ✅ |
+| 3 | Routing — subdomains | ✅ decided |
+| 4 | Spin up App on DO (web + worker + MySQL + Valkey + Spaces) | ✅ |
+| 5 | Custom domain `mailer.gravitasleads.io` + cert + CORS + `PUBLIC_BASE_URL` | ✅ |
+| 6 | Real Stripe (test mode first), two-layer idempotency, webhook | ⏳ next |
+| 7 | GitHub Actions CI exists; needs branch-protection click | partial |
+| 8 | sources + Dashboard federation | deferred |
 
-### Phase 4 detail (DO App Platform)
-- **User is now DO Owner** (was Member; admin elevated). Spaces bucket `gravitas-mailer-prod` (nyc3) + access key created and saved.
-- **Managed DBs created** (separate, ~$15/mo each, region nyc1): `gravitas-mailer-db` (MySQL **8.4**), `gravitas-mailer-redis` (**Valkey 8.0** — Redis engine was region-blocked in nyc1, DO steers to Valkey). App Platform dev DBs are Postgres-only, so MySQL/Valkey must be pre-created managed clusters and attached by `cluster_name`.
-- **doctl** installed + authed (token is Owner-level). Control panel does NOT read `.do/app.yaml` — must use `doctl apps create --spec`.
-- **Spec fixes made** (uncommitted, local only): worker moved under `workers:` (was under `services:` → `/` route collision); `production: true` on both DBs; explicit `DATABASE_URL`/`REDIS_URL` env bindings (`${mailer-db.DATABASE_URL}` / `${mailer-redis.DATABASE_URL}`) on web + worker (App Platform does NOT auto-inject these); MySQL `8.4`; redis→`VALKEY` `8`; added Stripe SECRET env declarations.
-- **Code fix** (uncommitted): `app/extensions.py` `_prepare_db_url()` rewrites DO's `mysql://...?ssl-mode=REQUIRED` → `mysql+pymysql://` + attaches a no-verify TLS context (DO MySQL requires SSL; PyMySQL doesn't grok the `ssl-mode` param). Local dev URLs untouched.
-- **App created with EMPTY secrets** (set via UI in 4E below). First deploy ERRORED at boot — diagnose first (see "FIRST THING TO DO ON RESUME" at top). REMAINING STEPS once boot is fixed:
-  - **4E**: set secret values via DO UI (App → Settings → web component env vars): `SECRET_KEY`, `INTERNAL_API_KEY`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`; same `SECRET_KEY` + `S3_ACCESS_KEY`/`S3_SECRET_KEY` on the worker. Stripe keys stay empty (STRIPE_ENABLED=false). Redeploy. (User HAS these values saved: the 2 generated secrets + the Spaces access key/secret.)
-  - **4F**: Spaces bucket → Settings → CORS → allow the app origin (PUT/GET/HEAD, ExposeHeaders ETag) once URL known.
-  - **4G**: verify `/api/internal/health` over HTTPS.
-- **Commit pending**: all spec + code changes (`.do/app.yaml`, `app/extensions.py`) are LOCAL ONLY — need committing to GitHub via the `/tmp` GIT_DIR workaround. NOTE: once committed, deploy_on_push will auto-redeploy with the fixes — but the app was created from the spec via doctl, and the SECRET env *values* live only in DO (not git), so a push redeploy keeps them. Decide whether to push the fixes (triggers redeploy) vs `doctl apps update --spec` — both work; pushing also keeps GitHub in sync.
-| 5 | Attach custom domain `mailer.gravitasleads.io`, flip `PUBLIC_BASE_URL` | ⏳ user action |
-| 6 | Real Stripe with two-layer idempotency (job-scoped lock + Stripe `Idempotency-Key` header) + webhook + Elements client | ⏳ I'll write, user pastes secrets — test mode first |
-| 7 | GitHub Actions CI (already authored in `.github/workflows/ci.yml`) + branch protection | partial — workflow exists, needs branch protection click |
-| 8 | sources + Dashboard federation. "sources" doesn't exist yet — TBD. Defer. | ⏳ later |
+**Open bug:** scrub completion fails at pay (`generate_scrub_artifact` raises "no field mappings"). Diagnosis + fix steps in `continueContext.md §2`.
 
-### Decisions locked in
-- **Routing**: subdomains (not paths)
-- **Registrar**: name.com (NS change at My Account → Domains → `gravitasleads.io` → Nameservers → Manage)
-- **Stripe**: test mode first (`pk_test_*`/`sk_test_*`), flip to live after one full round-trip
-- **`sources` app**: TBD, deferred until mailer is live
+**Live infra at a glance:** App ID `3fb2e338-db24-45ad-8965-e01a1e17a908`; MySQL 8.4 + Valkey 8.0 (both nyc1); Spaces `gravitas-mailer-prod` (nyc3); Spaces key `mailer-prod-2`; GitHub `rolflouisdor-stack/projectX` (autodeploys on push).
 
-### The blocker (full diagnosis in memory)
-JumpCloud MDM denies all writes to `.git/config` and `.git/config.lock` inside `/Users/rolf.louisdor/`. Confirmed: writes to *other* files in the same dirs work; `git init` works in `/tmp/`; no ACLs/xattrs/flags on the paths. Don't chase chmod/chflags rabbit holes — see `~/.claude/projects/-Users-rolf-louisdor-Desktop-mailer/memory/jumpcloud_git_block.md`. User has been told to email IT for a policy exception in parallel.
+**Git on this Mac:** JumpCloud blocks git writes under `/Users/`. Workaround is `GIT_DIR=/tmp/mailer-git-meta`, `GIT_WORK_TREE=/Users/rolf.louisdor/Desktop/mailer`; `/tmp` is wiped on reboot. Full instructions + rebuild path in `continueContext.md §5`. Memory: [[jumpcloud-git-block]].
 
-### Git reference (Phase 1 push DONE — this is for committing the pending spec/code fixes later, NOT the first action)
-> ⚠️ First action on resume is the DO deploy diagnosis at the very top, not git.
+**Decisions locked in:** subdomain routing; name.com registrar (NS at DO); Stripe test mode first; `sources` app TBD.
 
-To commit the pending `.do/app.yaml` + `app/extensions.py` fixes — **if `/tmp/mailer-git-meta` still exists** (survives only if the Mac wasn't rebooted):
-```bash
-export GIT_DIR=/tmp/mailer-git-meta
-export GIT_WORK_TREE=/Users/rolf.louisdor/Desktop/mailer
-git add . && git commit -m "Fix DO app spec + MySQL TLS for deploy" && git push
-```
-**If `/tmp` was wiped on reboot** (GIT_DIR gone): re-init, re-point at the remote, and adopt existing history before committing so the push isn't a non-fast-forward:
-```bash
-export GIT_DIR=/tmp/mailer-git-meta
-export GIT_WORK_TREE=/Users/rolf.louisdor/Desktop/mailer
-git init "$GIT_DIR"
-git remote add origin https://github.com/rolflouisdor-stack/projectX.git
-git fetch origin
-git reset --soft origin/main      # adopt remote history, keep working-tree changes staged
-git add . && git commit -m "Fix DO app spec + MySQL TLS for deploy" && git push -u origin main
-```
-Note: pushing triggers deploy_on_push → auto-redeploy. The app was created from the LOCAL spec via doctl, and SECRET values live only in DO (not git), so a push keeps them. Committing is for GitHub sync + autodeploy, NOT required to fix the current deploy error.
-
-### Files changed in Phase 0 (uncommitted, will land in first commit)
-- `README.md` — created
-- `.do/app.yaml` — github.repo set to `rolflouisdor-stack/projectX`; added `STRIPE_PUBLISHABLE_KEY` / `STRIPE_SECRET_KEY` / `STRIPE_WEBHOOK_SECRET` as SECRET envs
-- `.github/workflows/ci.yml` — created (ruff + import smoke + compileall)
-- `.gitignore` — added `.claude/`
-
-### User-supplied artifacts for later phases
-- GitHub repo: `https://github.com/rolflouisdor-stack/projectX.git` (assumed empty)
-- Domain: `gravitasleads.io` (bought at name.com, not yet pointed at DO)
-- Stripe publishable LIVE key was shared in chat — fine, that's public by design. Live secret key + test keys still to come, will be pasted only into DO env-var UI.
-
-### Background processes likely still running (may be killed by reboot)
-- Mailer Flask on :5070 — task `bpme1hr3m`
-- MinIO on :9000 (data dir `/tmp/minio-data`) — task `b1uwdoiof`
-
-If they're not up tomorrow: restart mailer with `PORT=5070 python3 run.py`, restart MinIO with the block in `[[run-environment]]` memory.
+**Local dev still works:** mailer on :5070, MinIO on :9000 (`/tmp/minio-data`). See §3 + `continueContext.md §9`.
 
 ---
 
