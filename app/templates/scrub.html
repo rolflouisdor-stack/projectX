@@ -210,6 +210,25 @@
     </div>
 </section>
 
+<!-- Unmapped-columns warning modal (shown on Continue when 3+ columns are skipped) -->
+<div id="skipModal" class="gm-modal-overlay" style="display:none;">
+    <div class="gm-modal-card" role="dialog" aria-modal="true" aria-labelledby="skipModalTitle">
+        <h3 id="skipModalTitle" style="margin:0 0 10px;">Some columns aren't mapped</h3>
+        <p id="skipModalBody" class="pp-text-muted" style="margin:0 0 10px;"></p>
+        <p style="margin:0 0 22px;">These fields won't be included in your scrubbed file. Do you want to proceed without them?</p>
+        <div class="pp-flex" style="justify-content:flex-end; gap:10px;">
+            <button id="skipModalCancel" class="pp-btn pp-btn-secondary">Go back &amp; review</button>
+            <button id="skipModalProceed" class="pp-btn pp-btn-primary">Proceed without them</button>
+        </div>
+    </div>
+</div>
+
+<style>
+.gm-modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:flex-start;justify-content:center;z-index:1000;padding:12vh 20px 20px;}
+.gm-modal-card{background:#fff;border-radius:12px;max-width:520px;width:100%;padding:24px 26px;box-shadow:0 20px 50px rgba(0,0,0,.25);}
+.gm-modal-card h3{font-size:20px;}
+</style>
+
 <script>
 const state = {
     step: 1,
@@ -349,7 +368,9 @@ function renderMappingTable() {
             const sel = (suggested === s) ? ' selected' : '';
             return `<option value="${s}"${sel}>${s}</option>`;
         }).join('');
-        const customSel = (!suggested) ? ' selected' : '';
+        // Unrecognized columns default to Skip (not Custom): keeps unwanted
+        // columns out of the result and avoids the EAV-write blowup on import.
+        const skipSel = (!suggested) ? ' selected' : '';
         return `
             <tr data-row-index="${i}">
                 <td><strong>${escapeHtml(h)}</strong></td>
@@ -357,17 +378,17 @@ function renderMappingTable() {
                 <td>
                     <select class="pp-input map-target" style="padding: 6px 8px;">
                         ${stdOptions}
-                        <option value="__custom__"${customSel}>Custom field…</option>
-                        <option value="__skip__">— Skip this column —</option>
+                        <option value="__custom__">Custom field…</option>
+                        <option value="__skip__"${skipSel}>— Skip this column —</option>
                     </select>
                 </td>
                 <td>
                     <input class="pp-input map-custom" type="text" placeholder="e.g. car_model"
-                        value="${escapeHtml(suggested ? '' : suggestCustomName(h))}"
-                        style="padding: 6px 8px; ${suggested ? 'display:none;' : ''}">
+                        value="${escapeHtml(suggestCustomName(h))}"
+                        style="padding: 6px 8px; display:none;">
                 </td>
                 <td style="text-align:center;">
-                    <input type="checkbox" class="map-skip">
+                    <input type="checkbox" class="map-skip"${suggested ? '' : ' checked'}>
                 </td>
             </tr>`;
     }).join('');
@@ -446,6 +467,22 @@ document.getElementById('step2Next').addEventListener('click', async () => {
         return;
     }
 
+    // Warn before proceeding if a lot of columns are being left unmapped.
+    const skippedCols = mappings.filter(m => m.skip);
+    if (skippedCols.length >= 3) {
+        const names = skippedCols.map(m => m.source_header).join(', ');
+        document.getElementById('skipModalBody').textContent =
+            `${skippedCols.length} columns are not mapped and will be skipped: ${names}.`;
+        pendingMappings = mappings;
+        document.getElementById('skipModal').style.display = 'flex';
+        return;
+    }
+    submitMapping(mappings);
+});
+
+let pendingMappings = null;
+
+async function submitMapping(mappings) {
     const btn = document.getElementById('step2Next');
     btn.disabled = true; const orig = btn.innerHTML; btn.textContent = 'Saving…';
     try {
@@ -461,6 +498,15 @@ document.getElementById('step2Next').addEventListener('click', async () => {
     } finally {
         btn.disabled = false; btn.innerHTML = orig;
     }
+}
+
+document.getElementById('skipModalProceed').addEventListener('click', () => {
+    document.getElementById('skipModal').style.display = 'none';
+    if (pendingMappings) { const m = pendingMappings; pendingMappings = null; submitMapping(m); }
+});
+document.getElementById('skipModalCancel').addEventListener('click', () => {
+    document.getElementById('skipModal').style.display = 'none';
+    pendingMappings = null;
 });
 
 // ── Step 3: poll job status ──────────────────────────────────────────────
