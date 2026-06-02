@@ -49,46 +49,44 @@ def run_mock_scrub_on_records(job):
     unique = 0
     overlap = 0
 
-    # Process in chunks so we don't load everything in memory at once. For a
-    # few-hundred-MB file with ~10M rows this matters.
+    # Process in chunks so we don't load everything in memory at once. Keyset
+    # pagination (id > last_id), NOT offset — offset re-scans on every page,
+    # which is O(n^2) on a 600k-row job. We read only (id, email_normalized) and
+    # write verdicts back with a single bulk UPDATE per batch, instead of the
+    # ORM dirty-tracking one UPDATE per row.
     BATCH = 5000
-    offset = 0
+    last_id = 0
     while True:
-        rows = (db.query(ScrubJobRecord)
-                .filter_by(scrub_job_id=job.id)
+        rows = (db.query(ScrubJobRecord.id, ScrubJobRecord.email_normalized)
+                .filter(ScrubJobRecord.scrub_job_id == job.id,
+                        ScrubJobRecord.id > last_id)
                 .order_by(ScrubJobRecord.id)
-                .offset(offset).limit(BATCH).all())
+                .limit(BATCH).all())
         if not rows:
             break
-        for r in rows:
+        updates = []
+        for rid, email_norm in rows:
             uploaded += 1
             # Records with no email (or no email column mapped at all) can't
             # be validated or matched. Mark invalid, keep them in the table.
-            if not r.email_normalized:
-                r.is_valid = False
-                r.invalid_reason = 'syntax'
-                r.is_unique = False
+            if not email_norm:
+                updates.append({'id': rid, 'is_valid': False, 'invalid_reason': 'syntax', 'is_unique': False})
                 invalid += 1
-                continue
-
-            if job.cleaning_opted_in and random.random() > valid_rate:
-                r.is_valid = False
-                r.invalid_reason = random.choice(invalid_reasons)
-                r.is_unique = False
+            elif job.cleaning_opted_in and random.random() > valid_rate:
+                updates.append({'id': rid, 'is_valid': False,
+                                'invalid_reason': random.choice(invalid_reasons), 'is_unique': False})
                 invalid += 1
-                continue
-
-            r.is_valid = True
-            r.invalid_reason = None
-            validated += 1
-            if random.random() < unique_rate:
-                r.is_unique = True
-                unique += 1
             else:
-                r.is_unique = False
-                overlap += 1
+                validated += 1
+                is_uniq = random.random() < unique_rate
+                updates.append({'id': rid, 'is_valid': True, 'invalid_reason': None, 'is_unique': is_uniq})
+                if is_uniq:
+                    unique += 1
+                else:
+                    overlap += 1
+        db.bulk_update_mappings(ScrubJobRecord, updates)
         db.flush()
-        offset += BATCH
+        last_id = rows[-1].id
 
     price = calc_scrub_price_cents(unique, cleaning=bool(job.cleaning_opted_in))
 

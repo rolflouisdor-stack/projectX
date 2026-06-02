@@ -106,7 +106,10 @@ def enqueue_import(scrub_job_id: int):
     return q.enqueue(
         run_import,
         scrub_job_id,
-        job_timeout=60 * 60,         # 1 hour max — plenty for a few hundred MB
+        # Generous ceiling so a genuinely huge file never gets killed mid-import
+        # (which, pre-fix, stranded the job in `importing`). With bulk inserts an
+        # import is minutes, not hours — this is just a safety backstop.
+        job_timeout=4 * 60 * 60,     # 4 hours
         result_ttl=60 * 60 * 24,     # keep result info around for 24h
         failure_ttl=60 * 60 * 24 * 7,
     )

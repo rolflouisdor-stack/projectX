@@ -192,17 +192,23 @@ def run_import(scrub_job_id: int):
                 batch_extras_per_record = []   # one list per record in batch
                 row_index = 0
                 total_rows = 0
+                # Set created_at explicitly: bulk inserts don't reliably fire the
+                # model's Python-side default, and the column is NOT NULL.
+                now = datetime.utcnow()
 
                 for row in row_iter:
                     row_index += 1
                     std, extras = _build_record(
                         row, mappings, scrub_job_id, job.company_id, row_index)
-                    rec = ScrubJobRecord(
-                        scrub_job_id=scrub_job_id,
-                        company_id=job.company_id,
-                        row_index=row_index,
+                    # Accumulate plain dicts for a Core bulk insert (not ORM
+                    # objects) — far fewer round trips on large files.
+                    rec = {
+                        'scrub_job_id': scrub_job_id,
+                        'company_id': job.company_id,
+                        'row_index': row_index,
+                        'created_at': now,
                         **std,
-                    )
+                    }
                     batch_records.append(rec)
                     batch_extras_per_record.append(extras)
 
@@ -244,20 +250,56 @@ def run_import(scrub_job_id: int):
             logger.info("run_import: scrub_job %s imported %s rows, priced", scrub_job_id, job.uploaded_count)
         except Exception as e:
             logger.exception("run_import failed for scrub_job %s", scrub_job_id)
-            job.status = 'failed'
-            job.failure_reason = str(e)[:500]
-            db.commit()
+            # Clear any poisoned transaction (e.g. a failure mid-flush, or a
+            # timeout) before recording the failure, then re-fetch on the clean
+            # session — otherwise the status write can't commit and the job is
+            # left stuck in `importing` forever (the job-19 zombie).
+            db.rollback()
+            job = db.query(ScrubJob).filter_by(id=scrub_job_id).first()
+            if job:
+                job.status = 'failed'
+                job.failure_reason = str(e)[:500]
+                db.commit()
             raise
 
 
 def _flush_batch(db, records, extras_per_record):
-    """Add records, flush to get IDs, attach EAV extras, then commit."""
+    """Bulk-insert a batch of record dicts + their EAV fields.
+
+    Uses Core bulk inserts (executemany) instead of per-row ORM adds — the
+    difference between a few thousand and tens of thousands of rows/min on a
+    large file. Records carry a unique `row_index`, so when a batch actually has
+    custom (EAV) fields we read back the just-inserted ids by row_index to link
+    them. Jobs with no custom columns (the common case now that unmapped columns
+    default to skip) skip that lookup entirely — pure bulk insert.
+    """
+    from app.models.scrub_job_record import ScrubJobRecord
     from app.models.scrub_job_record_field import ScrubJobRecordField
-    for r in records:
-        db.add(r)
-    db.flush()   # populates r.id for every record
+    if not records:
+        return
+    db.bulk_insert_mappings(ScrubJobRecord, records)
+
+    if not any(extras_per_record):
+        return
+
+    scrub_job_id = records[0]['scrub_job_id']
+    lo = records[0]['row_index']
+    hi = records[-1]['row_index']
+    id_by_row = dict(
+        db.query(ScrubJobRecord.row_index, ScrubJobRecord.id)
+          .filter(ScrubJobRecord.scrub_job_id == scrub_job_id,
+                  ScrubJobRecord.row_index >= lo,
+                  ScrubJobRecord.row_index <= hi)
+          .all()
+    )
+    eav = []
+    now = datetime.utcnow()   # NOT NULL column; set explicitly for bulk insert
     for rec, extras in zip(records, extras_per_record):
+        rid = id_by_row.get(rec['row_index'])
+        if rid is None:
+            continue
         for ex in extras:
-            ex['record_id'] = rec.id
-            db.add(ScrubJobRecordField(**ex))
+            eav.append({**ex, 'record_id': rid, 'created_at': now})
+    if eav:
+        db.bulk_insert_mappings(ScrubJobRecordField, eav)
     # Caller commits at batch boundary so polling sees progress.

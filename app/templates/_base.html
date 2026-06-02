@@ -66,6 +66,13 @@
         }
         opts.credentials = 'include';
         const r = await fetch(url, opts);
+        // Expired/invalid session on a protected endpoint → send them to log in
+        // (instead of silently spamming 401s). Auth endpoints are exempt so a
+        // bad-password login/signup still shows its own error.
+        if (r.status === 401 && !String(url).includes('/api/auth/')) {
+            window.location.href = '/login';
+            throw new Error('Your session expired — please log in again.');
+        }
         const ct = r.headers.get('Content-Type') || '';
         const body = ct.includes('application/json') ? await r.json() : await r.text();
         if (!r.ok) {
