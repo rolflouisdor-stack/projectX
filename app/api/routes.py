@@ -349,6 +349,20 @@ def pay_scrub_job(job_id):
     if job.status not in ('priced', 'awaiting_payment'):
         return jsonify({'error': f'job is in status {job.status}'}), 409
 
+    # Guard *before* charging: a job with no kept columns (e.g. a file with no
+    # email column, everything skipped) or zero unique records has nothing to
+    # build or sell. Fail clearly here instead of charging and then dying in the
+    # artifact worker with "no field mappings".
+    kept_cols = (db.query(ScrubJobFieldMapping)
+                 .filter_by(scrub_job_id=job.id, skip=False).count())
+    if kept_cols == 0:
+        return jsonify({'error': "This scrub can't be downloaded because no columns were "
+                        "mapped (an email column is required). Please start a new scrub and "
+                        "map your email column."}), 400
+    if int(job.unique_count or 0) <= 0:
+        return jsonify({'error': "No unique records were found for this list, so there's "
+                        "nothing to download — you have not been charged."}), 400
+
     intent = create_payment_intent(int(job.price_cents or 0),
                                    description=f'Gravitas scrub #{job.id}')
     job.stripe_payment_intent_id = intent['id']

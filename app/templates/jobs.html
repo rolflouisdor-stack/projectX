@@ -41,6 +41,9 @@ function scrubAction(s) {
             return `<a href="/api/scrub-jobs/${s.id}/download" class="pp-btn pp-btn-secondary pp-btn-sm">Download</a>`;
         case 'priced':
         case 'awaiting_payment':
+            // Nothing to buy if no unique records were found (e.g. a file with no email column).
+            if (Number(s.unique_count || 0) <= 0)
+                return `<span class="pp-text-sm pp-text-muted">No records to download</span>`;
             return `<a href="/scrub?job=${s.id}" class="pp-btn pp-btn-primary pp-btn-sm">Continue to payment</a>`;
         case 'awaiting_mapping':
             return `<a href="/scrub?job=${s.id}" class="pp-btn pp-btn-primary pp-btn-sm">Finish mapping</a>`;
