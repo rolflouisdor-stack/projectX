@@ -23,11 +23,11 @@ from app.models.activity_log import (
 )
 from app.services.activity_logger import log_activity
 from app.services.pricing import calc_purchase_quote
-from app.services.xlsx_generator import generate_scrub_artifact, generate_purchase_artifact
+from app.services.xlsx_generator import generate_purchase_artifact
 from app.services.stripe_stub import create_payment_intent
 from app.services import storage
 from app.services.header_detector import detect_from_s3
-from app.jobs.queue import enqueue_import
+from app.jobs.queue import enqueue_import, enqueue_generate_scrub_artifact
 
 logger = logging.getLogger(__name__)
 api_bp = Blueprint('api', __name__, url_prefix='/api')
@@ -352,16 +352,11 @@ def pay_scrub_job(job_id):
     intent = create_payment_intent(int(job.price_cents or 0),
                                    description=f'Gravitas scrub #{job.id}')
     job.stripe_payment_intent_id = intent['id']
-    job.status = 'paid'
     job.paid_at = datetime.utcnow()
-    db.flush()
-
-    # Build the result xlsx from the real imported records and store it in Spaces.
-    filename, s3_key = generate_scrub_artifact(job)
-    job.result_filename = filename
-    job.result_s3_key = s3_key
-    job.status = 'complete'
-    job.completed_at = datetime.utcnow()
+    # Payment captured. Building the result xlsx reads every unique record and
+    # uploads it — too slow for the web request on large jobs — so hand it to
+    # the worker and let the client poll. Status: priced -> generating -> complete.
+    job.status = 'generating'
     db.commit()
 
     log_activity(
@@ -370,6 +365,16 @@ def pay_scrub_job(job_id):
         meta={'price_cents': job.price_cents, 'unique': job.unique_count,
               'stripe_intent': intent['id'], 'kind': 'scrub'},
     )
+
+    try:
+        enqueue_generate_scrub_artifact(job.id)
+    except Exception as e:
+        logger.exception("could not enqueue artifact generation for job %s", job.id)
+        job.status = 'failed'
+        job.failure_reason = f'could not start file generation: {e}'[:500]
+        db.commit()
+        return jsonify({'error': 'could not start file generation'}), 503
+
     return jsonify(job.to_dict())
 
 

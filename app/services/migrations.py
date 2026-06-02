@@ -75,7 +75,7 @@ def run_migrations(engine):
         'created', 'uploading', 'uploaded',
         'awaiting_mapping', 'importing',
         'validating', 'scrubbing', 'priced',
-        'awaiting_payment', 'paid', 'complete', 'failed',
+        'awaiting_payment', 'paid', 'generating', 'complete', 'failed',
     ])
 
     # ── purchase_jobs: Spaces-backed result ──

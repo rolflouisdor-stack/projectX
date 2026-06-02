@@ -63,13 +63,19 @@ def generate_scrub_artifact(job):
     ws = wb.create_sheet('records')
     ws.append(headers)
 
+    # Keyset pagination (WHERE id > last_id), NOT OFFSET. OFFSET re-scans and
+    # discards `offset` rows on every page → O(n²) on large result sets, which
+    # blew the request timeout on a 138k-row job. Keyset is linear.
     BATCH = 1000
-    offset = 0
+    last_id = 0
     while True:
         recs = (db.query(ScrubJobRecord)
-                .filter_by(scrub_job_id=job.id, is_unique=True, is_valid=True)
+                .filter(ScrubJobRecord.scrub_job_id == job.id,
+                        ScrubJobRecord.is_unique.is_(True),
+                        ScrubJobRecord.is_valid.is_(True),
+                        ScrubJobRecord.id > last_id)
                 .order_by(ScrubJobRecord.id)
-                .offset(offset).limit(BATCH).all())
+                .limit(BATCH).all())
         if not recs:
             break
         rec_ids = [r.id for r in recs]
@@ -85,7 +91,7 @@ def generate_scrub_artifact(job):
             row = [getattr(r, t, None) for t in standard_targets]
             row += [by_rec.get(r.id, {}).get(t) for t in custom_targets]
             ws.append(row)
-        offset += BATCH
+        last_id = recs[-1].id
 
     filename = f'gravitas_scrub_{job.id}_{datetime.utcnow():%Y%m%d}.xlsx'
     s3_key = storage.result_key(job.company_id, job.id, filename)

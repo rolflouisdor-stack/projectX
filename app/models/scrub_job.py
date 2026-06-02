@@ -29,7 +29,7 @@ class ScrubJob(Base):
         'created', 'uploading', 'uploaded',
         'awaiting_mapping', 'importing',
         'validating', 'scrubbing', 'priced',
-        'awaiting_payment', 'paid', 'complete', 'failed',
+        'awaiting_payment', 'paid', 'generating', 'complete', 'failed',
         name='scrub_job_status'),
         default='created', nullable=False, index=True)
 
