@@ -59,6 +59,22 @@ def _add_index(engine, table: str, index_name: str, columns: list):
         return False
 
 
+def _drop_index(engine, table: str, index_name: str):
+    """Drop an index if present (MySQL). Safe to re-run / race; logs on failure
+    (e.g. if MySQL still needs it for an FK — caller must ensure another
+    covering index exists first)."""
+    if not _has_index(engine, table, index_name):
+        return False
+    try:
+        with engine.begin() as conn:
+            conn.execute(text(f'DROP INDEX `{index_name}` ON `{table}`'))
+        logger.info("migrations: dropped redundant index %s on %s", index_name, table)
+        return True
+    except Exception as e:
+        logger.warning("migrations: drop index %s on %s failed: %s", index_name, table, e)
+        return False
+
+
 def _modify_enum(engine, table: str, column: str, values: list):
     """Widen an ENUM column to include extra values (MySQL only).
 
@@ -109,6 +125,20 @@ def run_migrations(engine):
     # instead of re-scanning every row of the job per batch (was O(n^2) on a
     # large EAV-heavy upload — 49 min import on an 878k-row / 4.4M-EAV file).
     _add_index(engine, 'scrub_job_records', 'idx_sjr_job_rowidx', ['scrub_job_id', 'row_index'])
+
+    # Drop redundant duplicate indexes that inflated every insert (each column
+    # was indexed 2-3x). Done AFTER idx_sjr_job_rowidx exists, so scrub_job_id's
+    # FK keeps a covering index. Safe: idx_sjr_company keeps company_id,
+    # idx_sjr_job_rowidx keeps scrub_job_id, idx_sjrf_record keeps record_id,
+    # idx_sjrf_job_field keeps the EAV scrub_job_id.
+    for _tbl, _idx in (
+        ('scrub_job_records', 'ix_scrub_job_records_scrub_job_id'),
+        ('scrub_job_records', 'idx_sjr_job'),
+        ('scrub_job_records', 'ix_scrub_job_records_company_id'),
+        ('scrub_job_record_fields', 'ix_scrub_job_record_fields_record_id'),
+        ('scrub_job_record_fields', 'ix_scrub_job_record_fields_scrub_job_id'),
+    ):
+        _drop_index(engine, _tbl, _idx)
 
     # ── purchase_jobs: Spaces-backed result ──
     _add_column(engine, 'purchase_jobs', 'result_s3_key', 'VARCHAR(500) NULL')

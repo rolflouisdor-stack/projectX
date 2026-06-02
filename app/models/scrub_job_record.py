@@ -19,10 +19,13 @@ class ScrubJobRecord(Base):
     __tablename__ = 'scrub_job_records'
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
+    # No per-column index=True here: the composite idx_sjr_job_rowidx covers
+    # scrub_job_id (and its FK), and idx_sjr_company covers company_id. Avoids
+    # the duplicate indexes that inflated every insert.
     scrub_job_id = Column(BigInteger, ForeignKey('scrub_jobs.id', ondelete='CASCADE'),
-                          nullable=False, index=True)
+                          nullable=False)
     company_id = Column(BigInteger, ForeignKey('mailer_companies.id'),
-                        nullable=False, index=True)
+                        nullable=False)
     row_index = Column(Integer, nullable=False)   # 1-based, header row excluded
 
     # ── Standard fields ──
@@ -44,7 +47,7 @@ class ScrubJobRecord(Base):
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
     __table_args__ = (
-        Index('idx_sjr_job', 'scrub_job_id'),
+        Index('idx_sjr_job_rowidx', 'scrub_job_id', 'row_index'),
         Index('idx_sjr_email_norm', 'email_normalized'),
         Index('idx_sjr_company', 'company_id'),
     )

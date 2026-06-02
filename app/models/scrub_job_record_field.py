@@ -17,10 +17,13 @@ class ScrubJobRecordField(Base):
     __tablename__ = 'scrub_job_record_fields'
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
+    # No per-column index=True: idx_sjrf_record covers record_id (+ its FK) and
+    # idx_sjrf_job_field covers scrub_job_id (+ its FK). Avoids duplicate indexes
+    # that doubled write cost on the high-volume EAV table.
     record_id = Column(BigInteger, ForeignKey('scrub_job_records.id', ondelete='CASCADE'),
-                       nullable=False, index=True)
+                       nullable=False)
     scrub_job_id = Column(BigInteger, ForeignKey('scrub_jobs.id', ondelete='CASCADE'),
-                          nullable=False, index=True)
+                          nullable=False)
     field_name = Column(String(120), nullable=False)
     value_text = Column(Text, nullable=True)
 
