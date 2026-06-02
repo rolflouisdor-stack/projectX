@@ -44,9 +44,11 @@ def _raise_csv_field_limit():
 
 _raise_csv_field_limit()
 
-# How many records to commit per transaction. Keeps memory bounded and gives
-# the polling UI visible progress without a transaction-per-row tax.
-BATCH_SIZE = 1000
+# How many records to commit per transaction. Bigger batches mean far fewer
+# round-trips/commits to managed MySQL on large files (the dominant cost once
+# inserts are bulk). 5000 records + their EAV fields per batch stays well within
+# memory while cutting commit count ~5x vs 1000.
+BATCH_SIZE = 5000
 
 
 def _open_app_context():
