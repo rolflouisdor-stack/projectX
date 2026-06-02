@@ -19,8 +19,9 @@ Real implementation responsibilities (documented in Partner_portals_Spec §6):
 import random
 import logging
 
+from sqlalchemy import text
+
 from app.extensions import get_db
-from app.models.scrub_job_record import ScrubJobRecord
 from app.services.pricing import calc_scrub_price_cents
 
 logger = logging.getLogger(__name__)
@@ -29,64 +30,61 @@ logger = logging.getLogger(__name__)
 def run_mock_scrub_on_records(job):
     """Score every imported record + update aggregate counts + price on `job`.
 
-    Operates on the rows the import worker just wrote — no file-size
-    heuristics, no fake row counts. The bucketing math (valid % and
-    unique %) is still random pending the real email validator + the
-    real overlap-check; everything else is now backed by real data.
+    Operates on the rows the import worker just wrote. The bucketing math
+    (valid % and unique %) is still a random STUB pending the real email
+    validator + the real overlap-check, but it's applied with set-based SQL —
+    a handful of statements for the whole job, regardless of row count (the old
+    per-row loop took ~19 min on an 878k-row job). Three passes leave every row
+    with is_valid set; then we count the buckets.
     """
     db = get_db()
+    sid = job.id
 
     # Realistic stub thresholds, picked once per job so results are stable
     # within a single scrub but vary across uploads.
     valid_rate = random.uniform(0.91, 0.95) if job.cleaning_opted_in else 1.0
     unique_rate = random.uniform(0.32, 0.52)
 
-    invalid_reasons = ('syntax', 'undeliverable', 'disposable', 'role')
+    # 1) No email (or no email column mapped) → can't validate/match → invalid.
+    db.execute(text("""
+        UPDATE scrub_job_records
+           SET is_valid = 0, invalid_reason = 'syntax', is_unique = 0
+         WHERE scrub_job_id = :sid
+           AND (email_normalized IS NULL OR email_normalized = '')
+    """), {'sid': sid})
 
-    uploaded = 0
-    validated = 0
-    invalid = 0
-    unique = 0
-    overlap = 0
+    # 2) With cleaning, randomly drop ~(1 - valid_rate) of emailed rows.
+    if job.cleaning_opted_in:
+        db.execute(text("""
+            UPDATE scrub_job_records
+               SET is_valid = 0, invalid_reason = 'undeliverable', is_unique = 0
+             WHERE scrub_job_id = :sid
+               AND email_normalized IS NOT NULL AND email_normalized <> ''
+               AND is_valid IS NULL
+               AND RAND() >= :vr
+        """), {'sid': sid, 'vr': valid_rate})
 
-    # Process in chunks so we don't load everything in memory at once. Keyset
-    # pagination (id > last_id), NOT offset — offset re-scans on every page,
-    # which is O(n^2) on a 600k-row job. We read only (id, email_normalized) and
-    # write verdicts back with a single bulk UPDATE per batch, instead of the
-    # ORM dirty-tracking one UPDATE per row.
-    BATCH = 5000
-    last_id = 0
-    while True:
-        rows = (db.query(ScrubJobRecord.id, ScrubJobRecord.email_normalized)
-                .filter(ScrubJobRecord.scrub_job_id == job.id,
-                        ScrubJobRecord.id > last_id)
-                .order_by(ScrubJobRecord.id)
-                .limit(BATCH).all())
-        if not rows:
-            break
-        updates = []
-        for rid, email_norm in rows:
-            uploaded += 1
-            # Records with no email (or no email column mapped at all) can't
-            # be validated or matched. Mark invalid, keep them in the table.
-            if not email_norm:
-                updates.append({'id': rid, 'is_valid': False, 'invalid_reason': 'syntax', 'is_unique': False})
-                invalid += 1
-            elif job.cleaning_opted_in and random.random() > valid_rate:
-                updates.append({'id': rid, 'is_valid': False,
-                                'invalid_reason': random.choice(invalid_reasons), 'is_unique': False})
-                invalid += 1
-            else:
-                validated += 1
-                is_uniq = random.random() < unique_rate
-                updates.append({'id': rid, 'is_valid': True, 'invalid_reason': None, 'is_unique': is_uniq})
-                if is_uniq:
-                    unique += 1
-                else:
-                    overlap += 1
-        db.bulk_update_mappings(ScrubJobRecord, updates)
-        db.flush()
-        last_id = rows[-1].id
+    # 3) Remaining emailed rows → valid, with a random unique/overlap split.
+    db.execute(text("""
+        UPDATE scrub_job_records
+           SET is_valid = 1, invalid_reason = NULL, is_unique = (RAND() < :ur)
+         WHERE scrub_job_id = :sid
+           AND email_normalized IS NOT NULL AND email_normalized <> ''
+           AND is_valid IS NULL
+    """), {'sid': sid, 'ur': unique_rate})
+    db.flush()
+
+    def _count(where):
+        return db.execute(
+            text(f"SELECT COUNT(*) FROM scrub_job_records WHERE scrub_job_id = :sid AND {where}"),
+            {'sid': sid},
+        ).scalar() or 0
+
+    uploaded = _count("1 = 1")
+    invalid = _count("is_valid = 0")
+    validated = _count("is_valid = 1")
+    unique = _count("is_valid = 1 AND is_unique = 1")
+    overlap = _count("is_valid = 1 AND is_unique = 0")
 
     price = calc_scrub_price_cents(unique, cleaning=bool(job.cleaning_opted_in))
 

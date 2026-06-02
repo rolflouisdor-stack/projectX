@@ -33,6 +33,32 @@ def _add_column(engine, table: str, column: str, ddl: str):
     return True
 
 
+def _has_index(engine, table: str, index_name: str) -> bool:
+    try:
+        with engine.connect() as conn:
+            r = conn.execute(text(f'SHOW INDEX FROM `{table}` WHERE Key_name = :n'), {'n': index_name})
+            return r.first() is not None
+    except Exception:
+        return False
+
+
+def _add_index(engine, table: str, index_name: str, columns: list):
+    """Create a composite index if missing (MySQL). Safe to re-run; two
+    processes booting at once just race to create it and the loser logs a
+    warning."""
+    if _has_index(engine, table, index_name):
+        return False
+    cols = ", ".join(f"`{c}`" for c in columns)
+    try:
+        with engine.begin() as conn:
+            conn.execute(text(f'CREATE INDEX `{index_name}` ON `{table}` ({cols})'))
+        logger.info("migrations: added index %s on %s (%s)", index_name, table, cols)
+        return True
+    except Exception as e:
+        logger.warning("migrations: add index %s on %s failed: %s", index_name, table, e)
+        return False
+
+
 def _modify_enum(engine, table: str, column: str, values: list):
     """Widen an ENUM column to include extra values (MySQL only).
 
@@ -77,6 +103,12 @@ def run_migrations(engine):
         'validating', 'scrubbing', 'priced',
         'awaiting_payment', 'paid', 'generating', 'complete', 'failed',
     ])
+
+    # Composite index so the import worker's EAV id-lookup
+    # (WHERE scrub_job_id=? AND row_index BETWEEN ? AND ?) is a tight range scan
+    # instead of re-scanning every row of the job per batch (was O(n^2) on a
+    # large EAV-heavy upload — 49 min import on an 878k-row / 4.4M-EAV file).
+    _add_index(engine, 'scrub_job_records', 'idx_sjr_job_rowidx', ['scrub_job_id', 'row_index'])
 
     # ── purchase_jobs: Spaces-backed result ──
     _add_column(engine, 'purchase_jobs', 'result_s3_key', 'VARCHAR(500) NULL')
