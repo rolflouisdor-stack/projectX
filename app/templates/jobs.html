@@ -33,6 +33,30 @@
 </div>
 
 <script>
+// Status-aware action for a scrub row, so every job is actionable from history
+// (resume to mapping/payment, view progress, or download) — not a dead end.
+function scrubAction(s) {
+    switch (s.status) {
+        case 'complete':
+            return `<a href="/api/scrub-jobs/${s.id}/download" class="pp-btn pp-btn-secondary pp-btn-sm">Download</a>`;
+        case 'priced':
+        case 'awaiting_payment':
+            return `<a href="/scrub?job=${s.id}" class="pp-btn pp-btn-primary pp-btn-sm">Continue to payment</a>`;
+        case 'awaiting_mapping':
+            return `<a href="/scrub?job=${s.id}" class="pp-btn pp-btn-primary pp-btn-sm">Finish mapping</a>`;
+        case 'importing':
+        case 'validating':
+        case 'scrubbing':
+        case 'generating':
+        case 'paid':
+            return `<a href="/scrub?job=${s.id}" class="pp-btn pp-btn-secondary pp-btn-sm">View progress</a>`;
+        case 'failed':
+            return `<a href="/scrub" class="pp-btn pp-btn-ghost pp-btn-sm">Start over</a>`;
+        default:
+            return '';
+    }
+}
+
 async function loadJobs() {
     const data = await gmFetch('/api/jobs');
     const purchases = data.purchase_jobs || [];
@@ -59,8 +83,7 @@ async function loadJobs() {
     sb.innerHTML = scrubs.length === 0
         ? `<tr><td colspan="6" style="text-align:center;color:#94a3b8;padding:20px;">No scrubs yet.</td></tr>`
         : scrubs.map(s => {
-            const dl = s.status === 'complete'
-                ? `<a href="/api/scrub-jobs/${s.id}/download" class="pp-btn pp-btn-secondary pp-btn-sm">Download</a>` : '';
+            const dl = scrubAction(s);
             return `<tr>
                 <td>${(s.created_at || '').slice(0, 10)}</td>
                 <td class="number">${fmtNum(s.uploaded_count)}</td>
