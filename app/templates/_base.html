@@ -7,6 +7,17 @@
     <link rel="icon" type="image/png" href="{{ url_for('static', filename='img/gravitas_logo.png') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/mailer.css') }}">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <style>
+    /* Status badges with an explanatory hover tooltip. The tooltip element is
+       appended to <body> (not ::after) so the table wrapper's overflow:hidden
+       can't clip it. */
+    .gm-status[data-tip]{cursor:help;}
+    .pp-badge.gm-failed{background:#fef2f2;color:#dc2626;}
+    .gm-tip{position:absolute;z-index:1000;max-width:280px;background:#1f2430;color:#fff;
+        font-size:12px;line-height:1.45;font-weight:400;text-transform:none;letter-spacing:normal;
+        padding:8px 11px;border-radius:6px;box-shadow:0 8px 24px rgba(0,0,0,.25);
+        pointer-events:none;display:none;}
+    </style>
     {% block head %}{% endblock %}
 </head>
 <body class="pp-body pp-publisher">
@@ -69,6 +80,56 @@
     }
     function fmtNum(n) { return Number(n || 0).toLocaleString('en-US'); }
     function fmtMoney(cents) { return '$' + (Number(cents || 0) / 100).toLocaleString('en-US', { maximumFractionDigits: 0 }); }
+
+    // ─── Job-status badges + hover explanations (used by jobs + dashboard) ───
+    // One source of truth for what each status means and how long it usually
+    // lasts, surfaced as a hover tooltip so users aren't left guessing.
+    const GM_STATUS_INFO = {
+        created:          { label: 'Created',          tip: 'Your job was just created. Getting things ready — a few seconds.' },
+        uploading:        { label: 'Uploading',        tip: 'Your file is uploading to secure storage. Time depends on file size and your connection.' },
+        uploaded:         { label: 'Uploaded',         tip: 'Upload received. Preparing the column-mapping step — a few seconds.' },
+        awaiting_mapping: { label: 'Needs mapping',    tip: 'Waiting for you to choose which columns to keep. Open the job to finish mapping — this needs your input.' },
+        importing:        { label: 'Importing',        tip: 'Reading your file and loading every record into our system. A large list can take several minutes.' },
+        validating:       { label: 'Validating',       tip: 'Checking each email address for deliverability. Usually a few minutes.' },
+        scrubbing:        { label: 'Scrubbing',        tip: 'Comparing your list against our data to find your unique records. Usually a few minutes.' },
+        priced:           { label: 'Ready to pay',     tip: 'Scrub finished and your quote is ready. Review and pay to unlock the download — this needs your input.' },
+        awaiting_payment: { label: 'Awaiting payment', tip: 'Waiting for payment to unlock your download — this needs your input.' },
+        paid:             { label: 'Paid',             tip: 'Payment received. Preparing your file — usually under a minute.' },
+        generating:       { label: 'Generating file',  tip: 'Building your downloadable .xlsx file. Usually under a minute (a few minutes for very large lists). You can leave this page — check Job History and it will be ready to download.' },
+        complete:         { label: 'Complete',         tip: 'Done! Your file is ready to download.' },
+        failed:           { label: 'Failed',           tip: 'Something went wrong with this job. Open it for the reason, or contact support.' },
+    };
+
+    function gmStatusBadge(status) {
+        const info = GM_STATUS_INFO[status] || { label: status, tip: '' };
+        const cls = status === 'complete' ? 'pp-badge-success'
+                  : status === 'failed' ? 'gm-failed'
+                  : (['awaiting_mapping', 'priced', 'awaiting_payment'].includes(status) ? 'pp-badge-info' : '');
+        const tip = String(info.tip || '').replace(/"/g, '&quot;');
+        return `<span class="pp-badge gm-status ${cls}" data-tip="${tip}">${info.label || status}</span>`;
+    }
+
+    // Single floating tooltip, appended to <body> so table overflow can't clip it.
+    (function () {
+        let tipEl = null;
+        function show(target) {
+            const text = target.getAttribute('data-tip');
+            if (!text) return;
+            if (!tipEl) { tipEl = document.createElement('div'); tipEl.className = 'gm-tip'; document.body.appendChild(tipEl); }
+            tipEl.textContent = text;
+            tipEl.style.display = 'block';
+            const r = target.getBoundingClientRect();
+            tipEl.style.top = (r.bottom + 8 + window.scrollY) + 'px';
+            tipEl.style.left = (r.left + window.scrollX) + 'px';
+            const tr = tipEl.getBoundingClientRect();
+            const over = (r.left + tr.width) - window.innerWidth + 12;
+            if (over > 0) tipEl.style.left = (r.left + window.scrollX - over) + 'px';
+        }
+        function hide() { if (tipEl) tipEl.style.display = 'none'; }
+        document.addEventListener('mouseover', e => { const t = e.target.closest && e.target.closest('.gm-status[data-tip]'); if (t) show(t); });
+        document.addEventListener('mouseout', e => { const t = e.target.closest && e.target.closest('.gm-status[data-tip]'); if (t) hide(); });
+        window.addEventListener('scroll', hide, true);
+    })();
     </script>
     {% block scripts %}{% endblock %}
 </body>

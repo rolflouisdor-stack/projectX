@@ -50,7 +50,7 @@ async function loadJobs() {
                 <td>${fmtNum(p.volume)}</td>
                 <td>${verts || '—'}</td>
                 <td class="number money">${fmtMoney(p.price_cents)}</td>
-                <td><span class="pp-badge ${p.status === 'complete' ? 'pp-badge-success' : ''}">${p.status}</span></td>
+                <td>${gmStatusBadge(p.status)}</td>
                 <td>${dl}</td>
             </tr>`;
         }).join('');
@@ -66,7 +66,7 @@ async function loadJobs() {
                 <td class="number">${fmtNum(s.uploaded_count)}</td>
                 <td class="number">${fmtNum(s.unique_count)}</td>
                 <td class="number money">${fmtMoney(s.price_cents)}</td>
-                <td><span class="pp-badge ${s.status === 'complete' ? 'pp-badge-success' : ''}">${s.status}</span></td>
+                <td>${gmStatusBadge(s.status)}</td>
                 <td>${dl}</td>
             </tr>`;
         }).join('');

@@ -111,7 +111,7 @@ async function loadSummary() {
                 <td>${r.kind === 'scrub' ? 'Scrub' : 'Purchase'}</td>
                 <td class="number">${fmtNum(r.records)}</td>
                 <td class="number money">${fmtMoney(r.price_cents)}</td>
-                <td><span class="pp-badge ${r.status === 'complete' ? 'pp-badge-success' : ''}">${r.status}</span></td>
+                <td>${gmStatusBadge(r.status)}</td>
             </tr>
         `).join('');
     } catch (e) {}
