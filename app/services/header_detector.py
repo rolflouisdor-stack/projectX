@@ -23,8 +23,19 @@ import io
 import logging
 import os
 import re
+import sys
 import tempfile
 from typing import Optional
+
+# Match the import worker: lift csv's 128 KB per-field cap so a very large or
+# malformed (unclosed-quote) cell doesn't crash header sniffing either.
+_csv_limit = sys.maxsize
+while _csv_limit > 1:
+    try:
+        csv.field_size_limit(_csv_limit)
+        break
+    except OverflowError:
+        _csv_limit //= 10
 
 from openpyxl import load_workbook
 

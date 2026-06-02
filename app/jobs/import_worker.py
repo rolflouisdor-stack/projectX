@@ -17,10 +17,32 @@ Status writes are committed in batches so the web process polling
 import csv
 import logging
 import os
+import sys
 import tempfile
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
+
+
+def _raise_csv_field_limit():
+    """Lift the csv module's 128 KB per-field cap.
+
+    Real uploads contain very large single cells (long URLs / User-Agent
+    strings) and sometimes a malformed/unclosed quote that makes csv treat many
+    rows as one field — both trip the default limit with
+    "field larger than field limit (131072)" and abort the import. Raise it as
+    high as the platform's C long allows (sys.maxsize overflows on some, so step
+    down until it sticks)."""
+    limit = sys.maxsize
+    while limit > 1:
+        try:
+            csv.field_size_limit(limit)
+            return
+        except OverflowError:
+            limit //= 10
+
+
+_raise_csv_field_limit()
 
 # How many records to commit per transaction. Keeps memory bounded and gives
 # the polling UI visible progress without a transaction-per-row tax.
