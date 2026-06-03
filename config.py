@@ -70,6 +70,18 @@ class Config:
     REDIS_URL = os.getenv('REDIS_URL', 'redis://localhost:6379/0')
     RQ_QUEUE = os.getenv('RQ_QUEUE', 'mailer-default')
 
+    # Transactional email (job notifications). Provider-agnostic SMTP relay —
+    # works with SendGrid / Postmark / Resend / Mailgun / any SMTP. Off by
+    # default; flip EMAIL_ENABLED=true once SMTP creds + a verified sender
+    # domain are in place. Failures never break a job (best-effort send).
+    EMAIL_ENABLED = os.getenv('EMAIL_ENABLED', 'false').lower() in ('true', '1', 'yes')
+    SMTP_HOST = os.getenv('SMTP_HOST', '')
+    SMTP_PORT = int(os.getenv('SMTP_PORT', 587))
+    SMTP_USER = os.getenv('SMTP_USER', '')
+    SMTP_PASSWORD = os.getenv('SMTP_PASSWORD', '')
+    SMTP_USE_TLS = os.getenv('SMTP_USE_TLS', 'true').lower() in ('true', '1', 'yes')
+    EMAIL_FROM = os.getenv('EMAIL_FROM', 'Gravitas Leads <noreply@gravitasleads.io>')
+
 
 class DevelopmentConfig(Config):
     DEBUG = True

@@ -23,6 +23,16 @@ def _open_app_context():
     return create_app(cls)
 
 
+def _user_email(db, job):
+    """Best-effort lookup of the job owner's email for notifications."""
+    try:
+        from app.models.mailer_user import MailerUser
+        u = db.query(MailerUser).filter_by(id=job.user_id).first()
+        return u.email if u else None
+    except Exception:
+        return None
+
+
 def generate_scrub_artifact_job(scrub_job_id: int):
     """RQ entry point: build + store the scrub result xlsx, mark job complete."""
     app = _open_app_context()
@@ -44,6 +54,13 @@ def generate_scrub_artifact_job(scrub_job_id: int):
             job.completed_at = datetime.utcnow()
             db.commit()
             logger.info("artifact: scrub_job %s complete (%s)", scrub_job_id, filename)
+
+            # Notify: payment processed + file ready to download (best-effort).
+            try:
+                from app.services.email_service import notify_scrub_complete
+                notify_scrub_complete(job, _user_email(db, job))
+            except Exception:
+                logger.warning("complete notification failed for scrub_job %s", scrub_job_id, exc_info=True)
         except Exception as e:
             logger.exception("artifact generation failed for scrub_job %s", scrub_job_id)
             # Clear the (possibly poisoned) transaction before recording failure,
@@ -55,4 +72,9 @@ def generate_scrub_artifact_job(scrub_job_id: int):
                 job.status = 'failed'
                 job.failure_reason = str(e)[:500]
                 db.commit()
+                try:
+                    from app.services.email_service import notify_scrub_failed
+                    notify_scrub_failed(job, _user_email(db, job))
+                except Exception:
+                    logger.warning("failure notification failed for scrub_job %s", scrub_job_id, exc_info=True)
             raise

@@ -149,6 +149,16 @@ def _download_upload(job):
     return path
 
 
+def _user_email(db, job):
+    """Best-effort lookup of the job owner's email for notifications."""
+    try:
+        from app.models.mailer_user import MailerUser
+        u = db.query(MailerUser).filter_by(id=job.user_id).first()
+        return u.email if u else None
+    except Exception:
+        return None
+
+
 def _row_iter_for(path, job):
     """Pick the right row iterator for a downloaded upload on local disk."""
     name = (job.original_filename or job.s3_key or '').lower()
@@ -247,6 +257,13 @@ def run_import(scrub_job_id: int):
             )
 
             logger.info("run_import: scrub_job %s imported %s rows, priced", scrub_job_id, job.uploaded_count)
+
+            # Notify: scrub done, ready to review + pay (best-effort).
+            try:
+                from app.services.email_service import notify_scrub_priced
+                notify_scrub_priced(job, _user_email(db, job))
+            except Exception:
+                logger.warning("priced notification failed for scrub_job %s", scrub_job_id, exc_info=True)
         except Exception as e:
             logger.exception("run_import failed for scrub_job %s", scrub_job_id)
             # Clear any poisoned transaction (e.g. a failure mid-flush, or a
@@ -259,6 +276,11 @@ def run_import(scrub_job_id: int):
                 job.status = 'failed'
                 job.failure_reason = str(e)[:500]
                 db.commit()
+                try:
+                    from app.services.email_service import notify_scrub_failed
+                    notify_scrub_failed(job, _user_email(db, job))
+                except Exception:
+                    logger.warning("failure notification failed for scrub_job %s", scrub_job_id, exc_info=True)
             raise
 
 
