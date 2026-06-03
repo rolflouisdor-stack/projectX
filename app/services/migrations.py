@@ -110,6 +110,10 @@ def run_migrations(engine):
     _add_column(engine, 'scrub_jobs', 'delimiter', 'VARCHAR(8) NULL')
     _add_column(engine, 'scrub_jobs', 'result_s3_key', 'VARCHAR(500) NULL')
 
+    # Inline custom-column storage on records (replaces the EAV table for new
+    # jobs — see scrub_job_record.custom_json). INSTANT add on MySQL 8.
+    _add_column(engine, 'scrub_job_records', 'custom_json', 'JSON NULL')
+
     # Expand the status enum with the two new states (awaiting_mapping, importing,
     # plus the new uploading state for in-flight uploads). Keep all the
     # historical values so existing rows stay valid.

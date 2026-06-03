@@ -114,10 +114,11 @@ _STD_LIMITS = {
 
 
 def _build_record(row, mappings, scrub_job_id, company_id, row_index):
-    """Apply mappings to a single parsed row, returning (record_kwargs, extras_kwargs_list)."""
-    from app.models.scrub_job_record import ScrubJobRecord  # noqa: F401  (caller imports)
+    """Apply mappings to a single parsed row, returning (standard_fields,
+    custom_dict). Custom (non-standard) columns go into one dict that's stored
+    inline as the record's custom_json — no separate EAV rows."""
     std = {}
-    extras = []
+    custom = {}
     for m in mappings:
         if m.skip:
             continue
@@ -126,14 +127,10 @@ def _build_record(row, mappings, scrub_job_id, company_id, row_index):
         if m.is_standard:
             std[m.target_field] = _str(val, _STD_LIMITS.get(m.target_field))
         else:
-            extras.append({
-                'scrub_job_id': scrub_job_id,
-                'field_name': m.target_field,
-                'value_text': _str(val, 65535),
-            })
+            custom[m.target_field] = _str(val, 65535)
     if 'email' in std:
         std['email_normalized'] = _normalize_email(std.get('email'))
-    return std, extras
+    return std, custom
 
 
 def _download_upload(job):
@@ -191,7 +188,6 @@ def run_import(scrub_job_id: int):
             try:
                 row_iter = _row_iter_for(tmp_path, job)
                 batch_records = []
-                batch_extras_per_record = []   # one list per record in batch
                 row_index = 0
                 total_rows = 0
                 # Set created_at explicitly: bulk inserts don't reliably fire the
@@ -200,30 +196,31 @@ def run_import(scrub_job_id: int):
 
                 for row in row_iter:
                     row_index += 1
-                    std, extras = _build_record(
+                    std, custom = _build_record(
                         row, mappings, scrub_job_id, job.company_id, row_index)
                     # Accumulate plain dicts for a Core bulk insert (not ORM
-                    # objects) — far fewer round trips on large files.
+                    # objects). Custom columns ride along inline in custom_json,
+                    # so there are no separate EAV rows and no post-insert
+                    # id-lookup — records-only insert.
                     rec = {
                         'scrub_job_id': scrub_job_id,
                         'company_id': job.company_id,
                         'row_index': row_index,
                         'created_at': now,
+                        'custom_json': custom or None,
                         **std,
                     }
                     batch_records.append(rec)
-                    batch_extras_per_record.append(extras)
 
                     if len(batch_records) >= BATCH_SIZE:
-                        _flush_batch(db, batch_records, batch_extras_per_record)
+                        _flush_batch(db, batch_records)
                         total_rows += len(batch_records)
                         job.uploaded_count = total_rows
                         db.commit()
                         batch_records = []
-                        batch_extras_per_record = []
 
                 if batch_records:
-                    _flush_batch(db, batch_records, batch_extras_per_record)
+                    _flush_batch(db, batch_records)
                     total_rows += len(batch_records)
 
                 job.uploaded_count = total_rows
@@ -265,43 +262,15 @@ def run_import(scrub_job_id: int):
             raise
 
 
-def _flush_batch(db, records, extras_per_record):
-    """Bulk-insert a batch of record dicts + their EAV fields.
+def _flush_batch(db, records):
+    """Bulk-insert a batch of record dicts via Core executemany.
 
-    Uses Core bulk inserts (executemany) instead of per-row ORM adds — the
-    difference between a few thousand and tens of thousands of rows/min on a
-    large file. Records carry a unique `row_index`, so when a batch actually has
-    custom (EAV) fields we read back the just-inserted ids by row_index to link
-    them. Jobs with no custom columns (the common case now that unmapped columns
-    default to skip) skip that lookup entirely — pure bulk insert.
+    Custom columns are inline in each dict's custom_json, so this is a single
+    records-only insert — no separate EAV rows and no post-insert id-lookup
+    (which was the O(n^2)/volume bottleneck on EAV-heavy files). Caller commits
+    at the batch boundary so the polling UI sees progress.
     """
     from app.models.scrub_job_record import ScrubJobRecord
-    from app.models.scrub_job_record_field import ScrubJobRecordField
     if not records:
         return
     db.bulk_insert_mappings(ScrubJobRecord, records)
-
-    if not any(extras_per_record):
-        return
-
-    scrub_job_id = records[0]['scrub_job_id']
-    lo = records[0]['row_index']
-    hi = records[-1]['row_index']
-    id_by_row = dict(
-        db.query(ScrubJobRecord.row_index, ScrubJobRecord.id)
-          .filter(ScrubJobRecord.scrub_job_id == scrub_job_id,
-                  ScrubJobRecord.row_index >= lo,
-                  ScrubJobRecord.row_index <= hi)
-          .all()
-    )
-    eav = []
-    now = datetime.utcnow()   # NOT NULL column; set explicitly for bulk insert
-    for rec, extras in zip(records, extras_per_record):
-        rid = id_by_row.get(rec['row_index'])
-        if rid is None:
-            continue
-        for ex in extras:
-            eav.append({**ex, 'record_id': rid, 'created_at': now})
-    if eav:
-        db.bulk_insert_mappings(ScrubJobRecordField, eav)
-    # Caller commits at batch boundary so polling sees progress.

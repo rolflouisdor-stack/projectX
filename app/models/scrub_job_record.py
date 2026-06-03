@@ -10,7 +10,7 @@ engine then mutates `is_valid` / `is_unique` / `invalid_reason` in place.
 """
 from datetime import datetime
 from sqlalchemy import (
-    Column, BigInteger, Integer, String, DateTime, Boolean, ForeignKey, Index,
+    Column, BigInteger, Integer, String, DateTime, Boolean, ForeignKey, Index, JSON,
 )
 from app.extensions import Base
 
@@ -38,6 +38,13 @@ class ScrubJobRecord(Base):
     city = Column(String(120), nullable=True)
     state = Column(String(40), nullable=True)
     zip = Column(String(20), nullable=True)
+
+    # Non-standard ("custom") columns the user chose to keep, stored inline as
+    # one JSON object {field_name: value} per record. Replaces the
+    # scrub_job_record_fields EAV table (which multiplied row count N× and made
+    # large imports slow). Old rows still have their values in that EAV table;
+    # the xlsx generator falls back to it when custom_json is NULL.
+    custom_json = Column(JSON, nullable=True)
 
     # ── Scrub bookkeeping (the engine fills these) ──
     is_valid = Column(Boolean, nullable=True)

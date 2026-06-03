@@ -78,18 +78,23 @@ def generate_scrub_artifact(job):
                 .limit(BATCH).all())
         if not recs:
             break
-        rec_ids = [r.id for r in recs]
-        # Bulk-load custom fields for this batch, group by record id.
-        extras = (db.query(ScrubJobRecordField)
-                  .filter(ScrubJobRecordField.record_id.in_(rec_ids))
-                  .all())
+        # New jobs store custom columns inline in custom_json. Old jobs (NULL
+        # custom_json) kept them in the EAV table — fall back to it only for
+        # those rows, so we don't query the EAV table at all for new jobs.
         by_rec = {}
-        for e in extras:
-            by_rec.setdefault(e.record_id, {})[e.field_name] = e.value_text
+        if custom_targets:
+            eav_ids = [r.id for r in recs if r.custom_json is None]
+            if eav_ids:
+                extras = (db.query(ScrubJobRecordField)
+                          .filter(ScrubJobRecordField.record_id.in_(eav_ids))
+                          .all())
+                for e in extras:
+                    by_rec.setdefault(e.record_id, {})[e.field_name] = e.value_text
 
         for r in recs:
+            custom = r.custom_json if r.custom_json is not None else by_rec.get(r.id, {})
             row = [getattr(r, t, None) for t in standard_targets]
-            row += [by_rec.get(r.id, {}).get(t) for t in custom_targets]
+            row += [custom.get(t) for t in custom_targets]
             ws.append(row)
         last_id = recs[-1].id
 
