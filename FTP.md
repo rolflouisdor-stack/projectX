@@ -5,9 +5,32 @@ and how we automate the round trip. **Every** scrub job goes through this
 path — the real-time `/api/emailvalidation` REST endpoint was evaluated and
 dropped (see "Why FTP-only" below).
 
-> **Status:** design doc. No application code has been written yet. Everything
-> in "Verified facts" was confirmed by a live read-only probe of the FTP on
-> 2026-05-29 (listing dirs + reading one header row; nothing uploaded/deleted).
+> **Status (2026-06-03): EO ANSWERED — unblocked, building.** All 5 questions
+> resolved (see §10) and the `ValidationStatusId` code table is in §12. Product
+> decision: the scrub pipeline is being refactored to upload → confirm-email-col
+> → quote (per-record × margin) → **pay (stub for now)** → submit to EO → poll →
+> retrieve cleaned file → presigned download. The mock-scrub engine
+> (`scrub_engine.run_mock_scrub_on_records`) + per-unique pricing + DB-record
+> import are being removed.
+>
+> **EO answers, summarized:**
+> 1. **SFTP** = same host, but EO must whitelist OUR egress IP(s) to enable it.
+>    DO App Platform egress is **not static**, so SFTP needs a static egress
+>    first (dedicated egress IP / NAT droplet). **Use plain FTP (port 21) for
+>    now** — cleartext PII; matches the existing CX3-ops usage on the same
+>    `cx3ads` account. Code stays config-switchable (`EO_FTP_TLS`).
+> 2. **No completion signal.** Poll `processed/`, match our filename, confirm via
+>    size-stable / mtime — exactly the §8b design.
+> 3. **ValidationStatusId table → §12.** Keep/drop: DO-NOT-SEND = 2, 5, 6, 11;
+>    SEND = 1; discretion = 3, 4, 7, 9, 10, 13. **Code 11 (Unknown) is NOT charged
+>    by EO** (pricing nuance — billable count excludes code 11).
+> 4. **Turnaround:** ~30 min / 100k, 3–4 h / 1M, 24–30 h / 10M → poller every few
+>    min; `awaiting_ftp_result` timeout generous (≥ ~36 h).
+> 5. **No max size / row count.** But EO processes **FIFO** — a large file posted
+>    first blocks smaller files queued behind it. No split logic needed.
+>
+> **Still needed before go-live:** EO per-record **price** (for the quote math)
+> and the **FTP password** (add as encrypted `EO_FTP_PASSWORD` in DO).
 
 ---
 
@@ -338,3 +361,35 @@ is older than ~60s). Confirm with EO whether there's a safer completion signal.
   + the passive port range).
 - Keep `EO_FTP_ENABLED=false` in prod until the poller + ingest are validated end
   to end in dev.
+
+---
+
+## 12. ValidationStatusId code table (from EO, 2026-06-03)
+
+Source: EmailOversight "Status Definitions and Best Practices.pdf". The processed
+file's `ValidationStatusId` column maps to:
+
+| Code | Status | EO guidance | Keep/drop (our default) |
+|---|---|---|---|
+| 1  | Verified      | SEND                | **keep** |
+| 2  | Undeliverable | DO NOT SEND         | **drop** |
+| 3  | Catch-All     | send at discretion  | keep (discretion) |
+| 4  | Role          | send at discretion  | keep (discretion) |
+| 5  | Malformed     | DO NOT SEND         | **drop** |
+| 6  | Spam Trap     | DO NOT SEND         | **drop** |
+| 7  | Complainer    | send at discretion  | keep (discretion) |
+| 9  | Bot           | send at discretion  | keep (discretion) |
+| 10 | Seed Account  | send at discretion  | keep (discretion) |
+| 11 | Unknown       | DO NOT SEND         | **drop** — *EO does not charge for this code; reverify after 72h* |
+| 13 | Disposable    | send at discretion  | keep (discretion) |
+
+Notes:
+- **Hard drops:** 2, 5, 6, 11. **Always keep:** 1. **Discretion** (3, 4, 7, 9,
+  10, 13) — keep by default; could be a user-configurable toggle later.
+- **Billing:** EO doesn't charge for code 11 (Unknown). We charge the user
+  upfront on total record count, so unknowns are effectively extra margin / a
+  reconciliation line — note when wiring real billing.
+- **Filtering is a product choice (TBD):** hand EO's annotated `-processed.csv`
+  to the user as-is (they get every row + the status columns), OR drop the
+  hard-drop codes before serving. Default leaning: deliver as-is for v1 (simplest,
+  fully transparent), add an optional "remove undeliverable" toggle later.

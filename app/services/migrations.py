@@ -114,6 +114,13 @@ def run_migrations(engine):
     # jobs — see scrub_job_record.custom_json). INSTANT add on MySQL 8.
     _add_column(engine, 'scrub_job_records', 'custom_json', 'JSON NULL')
 
+    # EmailOversight FTP round-trip columns (see FTP.md).
+    _add_column(engine, 'scrub_jobs', 'email_column_index', 'INT NULL')
+    _add_column(engine, 'scrub_jobs', 'ftp_submitted_filename', 'VARCHAR(255) NULL')
+    _add_column(engine, 'scrub_jobs', 'ftp_processed_filename', 'VARCHAR(255) NULL')
+    _add_column(engine, 'scrub_jobs', 'ftp_submitted_at', 'DATETIME NULL')
+    _add_column(engine, 'scrub_jobs', 'ftp_result_ingested_at', 'DATETIME NULL')
+
     # Expand the status enum with the two new states (awaiting_mapping, importing,
     # plus the new uploading state for in-flight uploads). Keep all the
     # historical values so existing rows stay valid.
@@ -121,7 +128,9 @@ def run_migrations(engine):
         'created', 'uploading', 'uploaded',
         'awaiting_mapping', 'importing',
         'validating', 'scrubbing', 'priced',
-        'awaiting_payment', 'paid', 'generating', 'complete', 'failed',
+        'awaiting_payment', 'paid',
+        'submitting_ftp', 'awaiting_ftp_result',
+        'generating', 'complete', 'failed',
     ])
 
     # Composite index so the import worker's EAV id-lookup

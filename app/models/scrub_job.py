@@ -29,7 +29,9 @@ class ScrubJob(Base):
         'created', 'uploading', 'uploaded',
         'awaiting_mapping', 'importing',
         'validating', 'scrubbing', 'priced',
-        'awaiting_payment', 'paid', 'generating', 'complete', 'failed',
+        'awaiting_payment', 'paid',
+        'submitting_ftp', 'awaiting_ftp_result',   # EmailOversight round-trip
+        'generating', 'complete', 'failed',
         name='scrub_job_status'),
         default='created', nullable=False, index=True)
 
@@ -44,6 +46,13 @@ class ScrubJob(Base):
     content_type = Column(String(120), nullable=True)
     detected_headers_json = Column(JSON, nullable=True)     # ['Email','First','Last',...]
     delimiter = Column(String(8), nullable=True)            # sniffed delimiter for CSV/TSV/TXT
+    email_column_index = Column(Integer, nullable=True)     # which uploaded column holds the email (EO needs an 'email' header)
+
+    # ── EmailOversight FTP round-trip (see FTP.md) ──
+    ftp_submitted_filename = Column(String(255), nullable=True)   # exact RAW name we PUT to /cx3ads/
+    ftp_processed_filename = Column(String(255), nullable=True)   # name we expect in processed/
+    ftp_submitted_at = Column(DateTime, nullable=True)
+    ftp_result_ingested_at = Column(DateTime, nullable=True)      # idempotency guard
 
     # ── Legacy local-FS fields (kept for backward-compat row reads) ──
     uploaded_file_path = Column(String(500), nullable=True)

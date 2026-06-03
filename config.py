@@ -82,6 +82,23 @@ class Config:
     SMTP_USE_TLS = os.getenv('SMTP_USE_TLS', 'true').lower() in ('true', '1', 'yes')
     EMAIL_FROM = os.getenv('EMAIL_FROM', 'Gravitas Leads <noreply@gravitasleads.io>')
 
+    # EmailOversight bulk validation via FTP (see FTP.md). The scrub deliverable
+    # is EO's cleaned/annotated file. Off until creds are set + tested.
+    EO_FTP_ENABLED = os.getenv('EO_FTP_ENABLED', 'false').lower() in ('true', '1', 'yes')
+    EO_FTP_HOST = os.getenv('EO_FTP_HOST', 'ftp.emailoversight.com')
+    EO_FTP_PORT = int(os.getenv('EO_FTP_PORT', 21))
+    EO_FTP_USER = os.getenv('EO_FTP_USER', 'cx3ads')
+    EO_FTP_PASSWORD = os.getenv('EO_FTP_PASSWORD', '')          # SECRET
+    EO_FTP_TLS = os.getenv('EO_FTP_TLS', 'false').lower() in ('true', '1', 'yes')  # SFTP/FTPS later (needs static egress IP)
+    EO_FTP_ROOT = os.getenv('EO_FTP_ROOT', 'cx3ads')           # upload (RAW) dir
+    EO_FTP_PROCESSED_DIR = os.getenv('EO_FTP_PROCESSED_DIR', 'processed')
+    EO_FTP_FILENAME_PREFIX = os.getenv('EO_FTP_FILENAME_PREFIX', 'mailer-')
+
+    # Pricing for EO cleaning: user pays per-record EO cost + our margin.
+    # price_cents = ceil(records * EO_PRICE_PER_RECORD * (1 + EO_MARGIN_PCT/100) * 100)
+    EO_PRICE_PER_RECORD = float(os.getenv('EO_PRICE_PER_RECORD', 0))   # $/record EO charges us (set when known)
+    EO_MARGIN_PCT = float(os.getenv('EO_MARGIN_PCT', 35))             # our markup %
+
 
 class DevelopmentConfig(Config):
     DEBUG = True

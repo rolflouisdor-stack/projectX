@@ -200,3 +200,45 @@ def detect_from_s3(key: str, filename: Optional[str] = None) -> dict:
 
     result['suggested_mapping'] = suggest_mapping(result['headers'])
     return result
+
+
+def count_data_rows(key: str, filename: Optional[str] = None) -> int:
+    """Count data rows (excluding the header) in an uploaded file — used to
+    price the EmailOversight cleaning job. Delimited text is stream-counted from
+    Spaces (fast, low memory); XLSX is pulled to a temp file (zip needs the whole
+    file). TXT is treated as headerless (single email column, per FTP.md §5)."""
+    name = (filename or key or '').lower()
+
+    if name.endswith('.xlsx'):
+        fd, path = tempfile.mkstemp(suffix='.xlsx')
+        os.close(fd)
+        try:
+            storage.download_to_file(key, path)
+            wb = load_workbook(path, read_only=True, data_only=True)
+            ws = wb[wb.sheetnames[0]]
+            n = sum(1 for _ in ws.iter_rows())
+            wb.close()
+            return max(0, n - 1)
+        finally:
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+
+    body = storage.get_object_stream(key)
+    try:
+        newlines = 0
+        last = b''
+        while True:
+            chunk = body.read(1 << 20)
+            if not chunk:
+                break
+            newlines += chunk.count(b'\n')
+            last = chunk[-1:]
+    finally:
+        body.close()
+    # A file not ending in a newline has one more (unterminated) line.
+    total_lines = newlines + (1 if last not in (b'\n', b'') else 0)
+    if name.endswith('.txt'):
+        return max(0, total_lines)        # headerless
+    return max(0, total_lines - 1)        # CSV/TSV: drop the header row

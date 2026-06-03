@@ -2,7 +2,9 @@
 
 All amounts handled as cents (int) until the very last presentation layer.
 """
+import math
 from decimal import Decimal
+from flask import current_app
 from app.extensions import get_db
 from app.models.vertical import Vertical
 from app.models.pricing_tier import PricingTier
@@ -12,6 +14,29 @@ from datetime import datetime
 
 SCRUB_BASE_RATE = Decimal('0.018')        # $/unique-record
 SCRUB_CLEAN_PREMIUM = Decimal('1.20')     # +20% if cleaning opted-in
+
+
+def calc_eo_clean_price(record_count: int) -> dict:
+    """Price an EmailOversight cleaning job: per-record EO cost + our margin.
+
+    Rate + margin come from config (EO_PRICE_PER_RECORD, EO_MARGIN_PCT) so they
+    can be tuned without a redeploy. We charge upfront on total record count;
+    EO doesn't bill us for 'Unknown' (code 11) rows, which nets as extra margin
+    (see FTP.md §12). Returns {rate_per_record, eo_cost_cents, price_cents}.
+    """
+    cfg = current_app.config
+    eo_rate = Decimal(str(cfg.get('EO_PRICE_PER_RECORD') or 0))   # $/record EO charges us
+    margin = Decimal(str(cfg.get('EO_MARGIN_PCT') or 0)) / Decimal(100)
+    n = max(0, int(record_count or 0))
+
+    eo_cost = Decimal(n) * eo_rate                       # our cost from EO ($)
+    user_rate = eo_rate * (Decimal(1) + margin)          # $/record charged to user
+    user_total = Decimal(n) * user_rate                  # user pays ($)
+    return {
+        'rate_per_record': float(user_rate),
+        'eo_cost_cents': int(math.ceil(eo_cost * 100)),
+        'price_cents': max(0, int(math.ceil(user_total * 100))),
+    }
 
 
 def tier_discount_pct(volume: int) -> Decimal:
