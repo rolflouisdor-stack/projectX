@@ -27,7 +27,10 @@ from app.services.xlsx_generator import generate_purchase_artifact
 from app.services.stripe_stub import create_payment_intent
 from app.services import storage
 from app.services.header_detector import detect_from_s3
-from app.jobs.queue import enqueue_import, enqueue_generate_scrub_artifact
+from app.jobs.queue import (
+    enqueue_import, enqueue_generate_scrub_artifact,
+    enqueue_eo_quote, enqueue_eo_submit,
+)
 
 logger = logging.getLogger(__name__)
 api_bp = Blueprint('api', __name__, url_prefix='/api')
@@ -256,6 +259,45 @@ def scrub_detect_headers(job_id):
     })
 
 
+@api_bp.route('/scrub-jobs/<int:job_id>/confirm-email', methods=['POST'])
+@mailer_login_required
+def scrub_confirm_email(job_id):
+    """EmailOversight flow: the user confirms which column holds the email; we
+    count the records + price the clean job (async) and move to `priced`."""
+    data = request.get_json(silent=True) or {}
+    try:
+        idx = int(data.get('email_column_index'))
+    except (TypeError, ValueError):
+        return jsonify({'error': 'email_column_index is required'}), 400
+    db = get_db()
+    job = db.query(ScrubJob).filter_by(id=job_id, company_id=g.current_company.id).first()
+    if not job:
+        return jsonify({'error': 'not found'}), 404
+    if job.status != 'awaiting_mapping':
+        return jsonify({'error': f'job is in status {job.status}'}), 409
+    headers = job.detected_headers_json or []
+    if idx < 0 or idx >= len(headers):
+        return jsonify({'error': 'email_column_index out of range'}), 400
+
+    job.email_column_index = idx
+    job.status = 'importing'    # counting + pricing the file off the request path
+    db.commit()
+    log_activity(
+        g.current_company.id, ACTION_UPLOAD_LIST,
+        user_id=g.current_user.id, scrub_job_id=job.id,
+        meta={'email_column_index': idx, 'kind': 'scrub-clean'},
+    )
+    try:
+        enqueue_eo_quote(job.id)
+    except Exception as e:
+        logger.exception("could not enqueue EO quote for job %s", job.id)
+        job.status = 'failed'
+        job.failure_reason = f'could not start pricing: {e}'[:500]
+        db.commit()
+        return jsonify({'error': 'could not start pricing'}), 503
+    return jsonify(job.to_dict())
+
+
 @api_bp.route('/scrub-jobs/<int:job_id>/mapping', methods=['POST'])
 @mailer_login_required
 def scrub_save_mapping(job_id):
@@ -349,6 +391,35 @@ def pay_scrub_job(job_id):
     if job.status not in ('priced', 'awaiting_payment'):
         return jsonify({'error': f'job is in status {job.status}'}), 409
 
+    # ── EmailOversight flow: on payment, hand the file to EO for cleaning ──
+    from flask import current_app
+    if current_app.config.get('EO_FTP_ENABLED'):
+        if job.email_column_index is None or int(job.uploaded_count or 0) <= 0:
+            return jsonify({'error': "This list has nothing to clean (no email column "
+                            "confirmed, or zero records). Please start a new scrub."}), 400
+        intent = create_payment_intent(int(job.price_cents or 0),
+                                       description=f'Gravitas clean #{job.id}')
+        job.stripe_payment_intent_id = intent['id']
+        job.paid_at = datetime.utcnow()
+        job.status = 'submitting_ftp'   # worker uploads to EO + polls for the result
+        db.commit()
+        log_activity(
+            g.current_company.id, ACTION_PURCHASE,
+            user_id=g.current_user.id, scrub_job_id=job.id,
+            meta={'price_cents': job.price_cents, 'records': job.uploaded_count,
+                  'stripe_intent': intent['id'], 'kind': 'scrub-clean'},
+        )
+        try:
+            enqueue_eo_submit(job.id)
+        except Exception as e:
+            logger.exception("could not enqueue EO submit for job %s", job.id)
+            job.status = 'failed'
+            job.failure_reason = f'could not start cleaning: {e}'[:500]
+            db.commit()
+            return jsonify({'error': 'could not start cleaning'}), 503
+        return jsonify(job.to_dict())
+
+    # ── Legacy mock-scrub flow (when EO is off) ──
     # Guard *before* charging: a job with no kept columns (e.g. a file with no
     # email column, everything skipped) or zero unique records has nothing to
     # build or sell. Fail clearly here instead of charging and then dying in the
