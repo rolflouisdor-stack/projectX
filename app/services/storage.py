@@ -148,6 +148,16 @@ def put_object(key: str, body: bytes, content_type: str = 'application/octet-str
     )
 
 
+def upload_file(key: str, src_path: str, content_type: str = 'application/octet-stream') -> None:
+    """Upload a local file to Spaces via the managed transfer (ranged/multipart).
+    Use for large objects (e.g. EO's processed file) where buffering the whole
+    thing in memory isn't safe."""
+    get_client().upload_file(
+        src_path, _config()['bucket'], key,
+        ExtraArgs={'ContentType': content_type},
+    )
+
+
 def get_object_stream(key: str):
     """Open a streaming body for reading. Caller is responsible for closing.
 

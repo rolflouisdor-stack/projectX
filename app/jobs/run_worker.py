@@ -47,7 +47,9 @@ def main():
         # avoids the macOS fork+libobjc crash entirely, and is fine for the
         # current scale (one worker, one file-import job type).
         worker = SimpleWorker([Queue(queue_name, connection=conn)], connection=conn)
-        worker.work(with_scheduler=False)
+        # with_scheduler=True so RQ runs scheduled jobs (queue.enqueue_in) — the
+        # EmailOversight result poller reschedules itself this way (eo_worker).
+        worker.work(with_scheduler=True)
 
 
 if __name__ == '__main__':

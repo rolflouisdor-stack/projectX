@@ -115,6 +115,34 @@ def enqueue_import(scrub_job_id: int):
     )
 
 
+def enqueue_eo_quote(scrub_job_id: int):
+    """Count records + price the EO clean job (off the web request)."""
+    from app.jobs.eo_worker import eo_quote_job
+    return get_queue().enqueue(eo_quote_job, scrub_job_id,
+                               job_timeout=60 * 60, result_ttl=60 * 60 * 24,
+                               failure_ttl=60 * 60 * 24 * 7)
+
+
+def enqueue_eo_submit(scrub_job_id: int):
+    """After payment: upload the file to EO's FTP + start polling."""
+    from app.jobs.eo_worker import eo_submit_job
+    return get_queue().enqueue(eo_submit_job, scrub_job_id,
+                               job_timeout=60 * 60, result_ttl=60 * 60 * 24,
+                               failure_ttl=60 * 60 * 24 * 7)
+
+
+def schedule_eo_poll(scrub_job_id: int, attempt: int = 1, last_size=None):
+    """Schedule the next EO-result poll. Uses RQ's scheduler (enqueue_in) — the
+    worker must run with_scheduler=True. EO is a slow FIFO queue, so polls
+    reschedule themselves for up to ~36h."""
+    from datetime import timedelta
+    from app.jobs.eo_worker import eo_poll_job, POLL_INTERVAL_SEC
+    return get_queue().enqueue_in(
+        timedelta(seconds=POLL_INTERVAL_SEC),
+        eo_poll_job, scrub_job_id, attempt, last_size,
+        job_timeout=10 * 60, result_ttl=3600, failure_ttl=60 * 60 * 24)
+
+
 def enqueue_generate_scrub_artifact(scrub_job_id: int):
     """Queue result-xlsx generation. Runs off the web request path so large
     result sets don't blow the gunicorn timeout."""
