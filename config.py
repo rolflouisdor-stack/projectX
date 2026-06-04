@@ -44,6 +44,13 @@ class Config:
 
     INTERNAL_API_KEY = os.getenv('INTERNAL_API_KEY', '')
 
+    # Platform admins (comma-separated emails) get cross-company read access to
+    # the internal/admin API via their normal logged-in session — no API key
+    # needed. The CX3 Dashboard still uses INTERNAL_API_KEY for server-to-server.
+    ADMIN_EMAILS = {e.strip().lower() for e in
+                    os.getenv('ADMIN_EMAILS', 'rolf.louisdor@cx3ads.com').split(',')
+                    if e.strip()}
+
     STRIPE_ENABLED = os.getenv('STRIPE_ENABLED', 'false').lower() in ('true', '1', 'yes')
     STRIPE_SECRET_KEY = os.getenv('STRIPE_SECRET_KEY', '')
     STRIPE_WEBHOOK_SECRET = os.getenv('STRIPE_WEBHOOK_SECRET', '')

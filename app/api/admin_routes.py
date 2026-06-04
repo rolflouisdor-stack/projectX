@@ -811,3 +811,69 @@ def report_activity():
         'returned': len(rows),
         'rows': out,
     })
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Overview — one-call "everything happening in the app" snapshot
+# ─────────────────────────────────────────────────────────────────────────
+
+@admin_bp.route('/overview', methods=['GET'])
+@require_internal_key
+def platform_overview():
+    """Single cross-company snapshot for an admin: totals + revenue + the most
+    recent jobs and activity across every mailer. Window via ?days=N (default
+    30) or ?since=ISO. Returns enough to render an admin home screen in one call.
+    """
+    db = get_db()
+    since = _parse_since()
+    companies = _company_lookup(db)
+
+    total_companies = db.query(func.count(MailerCompany.id)).scalar() or 0
+    total_users = db.query(func.count(MailerUser.id)).scalar() or 0
+    new_companies = (db.query(func.count(MailerCompany.id))
+                     .filter(MailerCompany.created_at >= since).scalar() or 0)
+
+    purchases = (db.query(PurchaseJob)
+                 .filter(PurchaseJob.status.in_(('paid', 'complete')),
+                         PurchaseJob.paid_at >= since).all())
+    scrubs = (db.query(ScrubJob)
+              .filter(ScrubJob.status.in_(('paid', 'complete')),
+                      ScrubJob.paid_at >= since).all())
+    purchase_rev = sum(int(p.price_cents or 0) for p in purchases)
+    scrub_rev = sum(int(s.price_cents or 0) for s in scrubs)
+
+    # Most recent activity across the whole platform, in the window.
+    recent_jobs = ([_decorate_job(r, companies, 'purchase') for r in
+                    db.query(PurchaseJob).filter(PurchaseJob.created_at >= since)
+                      .order_by(PurchaseJob.created_at.desc()).limit(20).all()] +
+                   [_decorate_job(r, companies, 'scrub') for r in
+                    db.query(ScrubJob).filter(ScrubJob.created_at >= since)
+                      .order_by(ScrubJob.created_at.desc()).limit(20).all()])
+    recent_jobs.sort(key=lambda r: r.get('created_at') or '', reverse=True)
+    recent_jobs = recent_jobs[:20]
+
+    recent_activity = []
+    for r in (db.query(ActivityLog).filter(ActivityLog.created_at >= since)
+              .order_by(ActivityLog.created_at.desc()).limit(25).all()):
+        d = r.to_dict()
+        c = companies.get(r.company_id)
+        d['company_name'] = c.company_name if c else None
+        recent_activity.append(d)
+
+    return jsonify({
+        'window': {'since': since.isoformat(), 'generated_at': datetime.utcnow().isoformat()},
+        'companies': {'total': int(total_companies), 'new_in_window': int(new_companies),
+                      'total_users': int(total_users)},
+        'jobs': {
+            'purchases': {'count': len(purchases), 'revenue_cents': purchase_rev,
+                          'records_sold': sum(int(p.volume or 0) for p in purchases)},
+            'scrubs': {'count': len(scrubs), 'revenue_cents': scrub_rev,
+                       'records_uploaded': sum(int(s.uploaded_count or 0) for s in scrubs),
+                       'unique_found': sum(int(s.unique_count or 0) for s in scrubs)},
+        },
+        'revenue': {'purchase_cents': purchase_rev, 'scrub_cents': scrub_rev,
+                    'combined_cents': purchase_rev + scrub_rev,
+                    'combined_dollars': round((purchase_rev + scrub_rev) / 100, 2)},
+        'recent_jobs': recent_jobs,
+        'recent_activity': recent_activity,
+    })

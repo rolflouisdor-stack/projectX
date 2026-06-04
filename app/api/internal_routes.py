@@ -8,7 +8,7 @@ import logging
 from functools import wraps
 from datetime import datetime, timedelta
 from collections import Counter
-from flask import Blueprint, jsonify, request, current_app, abort
+from flask import Blueprint, jsonify, request, current_app, abort, g
 from sqlalchemy import func
 
 from app.extensions import get_db
@@ -27,15 +27,29 @@ internal_bp = Blueprint('internal', __name__, url_prefix='/api/internal')
 
 
 def require_internal_key(fn):
+    """Authorize internal/admin endpoints via EITHER:
+      1. the static X-Internal-Api-Key header (server-to-server, e.g. CX3 Dashboard), OR
+      2. a logged-in platform-admin session (ADMIN_EMAILS) — lets an admin hit
+         these cross-company endpoints straight from the browser.
+    """
     @wraps(fn)
     def inner(*args, **kwargs):
         sent = request.headers.get('X-Internal-Api-Key') or request.args.get('api_key')
         expected = current_app.config.get('INTERNAL_API_KEY')
+        if expected and sent and sent == expected:
+            return fn(*args, **kwargs)
+
+        # Fall back to an admin session (cookie-based).
+        from app.auth.decorators import current_user_or_none, is_admin_user
+        user, company = current_user_or_none()
+        if is_admin_user(user):
+            g.current_user = user
+            g.current_company = company
+            return fn(*args, **kwargs)
+
         if not expected:
             return jsonify({'error': 'internal API key not configured'}), 503
-        if not sent or sent != expected:
-            return jsonify({'error': 'invalid api key'}), 401
-        return fn(*args, **kwargs)
+        return jsonify({'error': 'admin access required'}), 401
     return inner
 
 

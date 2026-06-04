@@ -4,9 +4,19 @@ The decorator populates flask.g.current_user / g.current_company on success and
 redirects (HTML) or returns 401 (JSON/api) on failure.
 """
 from functools import wraps
-from flask import request, redirect, jsonify, g
+from flask import request, redirect, jsonify, g, current_app
 from app.auth.jwt_utils import verify_token, COOKIE_NAME
 from app.extensions import get_db
+
+
+def is_admin_user(user) -> bool:
+    """A platform admin: email in ADMIN_EMAILS (or an is_admin flag if one is
+    ever added to the user model). Drives cross-company access to the internal
+    API from a normal logged-in session."""
+    if not user:
+        return False
+    emails = current_app.config.get('ADMIN_EMAILS') or set()
+    return (user.email or '').lower() in emails or bool(getattr(user, 'is_admin', False))
 
 
 def _load_user(token):

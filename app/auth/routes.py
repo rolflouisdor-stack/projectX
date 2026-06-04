@@ -118,9 +118,11 @@ def logout():
 @auth_bp.route('/me', methods=['GET'])
 @mailer_login_required
 def me():
+    from app.auth.decorators import is_admin_user
     user = g.current_user
     company = g.current_company
     return jsonify({
         'user': user.to_dict(),
         'company': company.to_dict() if company else None,
+        'is_admin': is_admin_user(user),
     })
