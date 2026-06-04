@@ -119,6 +119,11 @@ def eo_submit_job(scrub_job_id: int):
             job.status = 'awaiting_ftp_result'
             db.commit()
             schedule_eo_poll(scrub_job_id, attempt=1, last_size=None)
+            try:
+                from app.services.email_service import notify_eo_payment_received
+                notify_eo_payment_received(job, _user_email(db, job))
+            except Exception:
+                logger.warning("payment-received notification failed for scrub_job %s", scrub_job_id, exc_info=True)
             logger.info("eo_submit: scrub_job %s submitted as %s", scrub_job_id, raw)
         except Exception as e:
             logger.exception("eo_submit failed for scrub_job %s", scrub_job_id)
@@ -159,8 +164,8 @@ def eo_poll_job(scrub_job_id: int, attempt: int = 1, last_size=None):
                 job.status = 'complete'
                 db.commit()
                 try:
-                    from app.services.email_service import notify_scrub_complete
-                    notify_scrub_complete(job, _user_email(db, job))
+                    from app.services.email_service import notify_eo_complete
+                    notify_eo_complete(job, _user_email(db, job))
                 except Exception:
                     logger.warning("complete notification failed for scrub_job %s", scrub_job_id, exc_info=True)
                 logger.info("eo_poll: scrub_job %s complete (%s)", scrub_job_id, name)

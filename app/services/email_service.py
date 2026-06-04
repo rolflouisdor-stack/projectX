@@ -87,6 +87,41 @@ def notify_scrub_complete(job, to_email):
     return send_email(to_email, subject, text)
 
 
+def notify_eo_payment_received(job, to_email):
+    """EO flow: payment confirmed and the list has been handed to EmailOversight
+    for cleaning. Sent right after the FTP submit succeeds."""
+    link = _link("/jobs")
+    fname = job.original_filename or f"list #{job.id}"
+    subject = f"Payment received — cleaning your list \"{fname}\""
+    text = (
+        f"Thanks — your payment was received and we've sent your list \"{fname}\" "
+        f"to our validation partner for cleaning.\n\n"
+        f"Records to clean: {int(job.uploaded_count or 0):,}\n"
+        f"Amount: ${int(job.price_cents or 0) / 100:,.2f}\n\n"
+        f"This runs in a queue and can take anywhere from a few minutes to several "
+        f"hours depending on size. You don't need to wait around — we'll email you "
+        f"the moment your cleaned file is ready. You can also check progress here:\n"
+        f"{link}\n\n"
+        f"— Gravitas Leads"
+    )
+    return send_email(to_email, subject, text)
+
+
+def notify_eo_complete(job, to_email):
+    """EO flow: cleaned file retrieved from EmailOversight — ready to download."""
+    link = _link(f"/scrub?job={job.id}")
+    fname = job.original_filename or f"list #{job.id}"
+    subject = f"Your cleaned list is ready to download — {fname}"
+    text = (
+        f"Good news — your list \"{fname}\" has finished cleaning.\n\n"
+        f"{int(job.uploaded_count or 0):,} records validated. Your file includes "
+        f"each email's deliverability status.\n\n"
+        f"Download it here (you may need to sign in):\n{link}\n\n"
+        f"— Gravitas Leads"
+    )
+    return send_email(to_email, subject, text)
+
+
 def notify_scrub_failed(job, to_email):
     """A job failed — let them know why instead of leaving them waiting."""
     link = _link("/jobs")
