@@ -12,19 +12,20 @@ Generated 2026-06-04. Source of truth is the code in `app/` — regenerate if ro
 
 1. [Conventions](#conventions)
 2. [Authentication](#authentication)
-3. [Server-rendered pages](#server-rendered-pages)
-4. [Auth API](#auth-api) — `/api/auth/*`
-5. [User API](#user-api) — `/api/*` (login required)
+3. [Getting started (curl walkthrough)](#getting-started-curl-walkthrough)
+4. [Server-rendered pages](#server-rendered-pages)
+5. [Auth API](#auth-api) — `/api/auth/*`
+6. [User API](#user-api) — `/api/*` (login required)
    - [Verticals & banner](#verticals--banner)
    - [Dashboard](#dashboard)
    - [Scrub jobs](#scrub-jobs)
    - [Purchase jobs](#purchase-jobs)
    - [Downloads](#downloads)
    - [Job history](#job-history)
-6. [Account API](#account-api) — `/api/account/*`
-7. [Internal API](#internal-api) — `/api/internal/*` (API-key or admin session)
-8. [Admin API](#admin-api) — `/api/internal/admin/*` (API-key or admin session)
-9. [Appendix: scrub job lifecycle & statuses](#appendix-scrub-job-lifecycle--statuses)
+7. [Account API](#account-api) — `/api/account/*`
+8. [Internal API](#internal-api) — `/api/internal/*` (API-key or admin session)
+9. [Admin API](#admin-api) — `/api/internal/admin/*` (API-key or admin session)
+10. [Appendix: scrub job lifecycle & statuses](#appendix-scrub-job-lifecycle--statuses)
 
 ---
 
@@ -59,6 +60,114 @@ Platform admins get full cross-company read access to the **entire internal + ad
 On a protected `/api/*` call without a valid session the API returns `401 {"error":"not authenticated"}`; protected **pages** redirect to `/login`.
 
 Payments are currently a **Stripe stub** (`create_payment_intent` always "succeeds"); `STRIPE_ENABLED=false`.
+
+---
+
+## Getting started (curl walkthrough)
+
+Concrete, copy-pasteable examples. Replace the host with `http://127.0.0.1:5070` for local dev. All examples reuse a cookie jar file (`cookies.txt`) for the session.
+
+### 1. Log in and save the session cookie
+
+```bash
+BASE=https://mailer.gravitasleads.io
+
+curl -s -c cookies.txt -X POST "$BASE/api/auth/login" \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"you@example.com","password":"your-password"}'
+# -> { "user": {...}, "company": {...} }   and writes the gm_session cookie to cookies.txt
+
+# Reuse it on every later call with -b cookies.txt. Confirm who you are:
+curl -s -b cookies.txt "$BASE/api/auth/me"
+# -> { "user": {...}, "company": {...}, "is_admin": false }
+```
+
+### 2. Clean a list end-to-end (EmailOversight flow)
+
+The browser normally drives this; here it is as raw API calls. The file is uploaded directly to object storage via presigned URLs, so it never passes through the API server.
+
+```bash
+BASE=https://mailer.gravitasleads.io
+FILE=mylist.csv
+SIZE=$(wc -c < "$FILE")
+
+# 2a. Create the job + open a multipart upload
+INIT=$(curl -s -b cookies.txt -X POST "$BASE/api/scrub-jobs/upload-init" \
+  -H 'Content-Type: application/json' \
+  -d "{\"filename\":\"$FILE\",\"size\":$SIZE,\"content_type\":\"text/csv\"}")
+echo "$INIT"
+# -> { "job_id": 42, "upload_id": "...", "s3_key": "...", "part_size": 10485760,
+#      "parts": [ { "PartNumber": 1, "url": "https://<presigned-PUT-url>" } ] }
+
+JOB=$(echo "$INIT" | python3 -c 'import sys,json;print(json.load(sys.stdin)["job_id"])')
+PUT_URL=$(echo "$INIT" | python3 -c 'import sys,json;print(json.load(sys.stdin)["parts"][0]["url"])')
+
+# 2b. PUT the file to the presigned URL and capture the ETag from the response headers.
+#     (Files larger than part_size: split into part_size chunks, PUT each part's URL,
+#      and collect every {PartNumber, ETag}.)
+ETAG=$(curl -s -D - -o /dev/null -X PUT "$PUT_URL" --data-binary @"$FILE" \
+       | tr -d '\r' | awk -F': ' 'tolower($1)=="etag"{print $2}')
+echo "ETag=$ETAG"
+
+# 2c. Finalize the upload
+curl -s -b cookies.txt -X POST "$BASE/api/scrub-jobs/$JOB/upload-complete" \
+  -H 'Content-Type: application/json' \
+  -d "{\"parts\":[{\"PartNumber\":1,\"ETag\":$ETAG}]}"
+# -> job, "status":"awaiting_mapping"
+
+# 2d. Detect headers (find which column is the email)
+curl -s -b cookies.txt -X POST "$BASE/api/scrub-jobs/$JOB/detect-headers"
+# -> { "headers":["email","first_name",...], "suggested_mapping":{"email":"email"}, ... }
+
+# 2e. Confirm the email column (0-based index into headers) -> kicks off the quote
+curl -s -b cookies.txt -X POST "$BASE/api/scrub-jobs/$JOB/confirm-email" \
+  -H 'Content-Type: application/json' \
+  -d '{"email_column_index":0}'
+# -> job, "status":"importing"
+
+# 2f. Poll until the quote is ready
+curl -s -b cookies.txt "$BASE/api/scrub-jobs/$JOB"
+# repeat until "status":"priced" — response has uploaded_count, rate_per_record, price_cents
+
+# 2g. Pay (stub) -> the worker sends the file to EmailOversight via FTP
+curl -s -b cookies.txt -X POST "$BASE/api/scrub-jobs/$JOB/pay"
+# -> job, "status":"submitting_ftp"  (then -> "awaiting_ftp_result")
+# A "payment received" email goes to the job owner here.
+
+# 2h. Poll until EO returns the cleaned file. EO is a FIFO queue — this can take
+#     minutes to hours depending on size + queue depth.
+curl -s -b cookies.txt "$BASE/api/scrub-jobs/$JOB"
+# wait for "status":"complete" — a "cleaned list is ready" email also fires.
+
+# 2i. Download the cleaned file
+curl -s -b cookies.txt "$BASE/api/scrub-jobs/$JOB/download-url"
+# -> { "url":"https://<presigned-GET-url>", "filename":"...", "expires_in":3600 }
+# Fetch it (the /download variant 302-redirects straight to the file):
+curl -L -b cookies.txt -o cleaned.csv "$BASE/api/scrub-jobs/$JOB/download"
+```
+
+> **Legacy mock-scrub flow** (when `EO_FTP_ENABLED=false`): replace step 2e with
+> `POST /api/scrub-jobs/$JOB/mapping` (a full `{mappings:[...]}` body), and after
+> `pay` the status goes `generating → complete` instead of the FTP states.
+
+### 3. Admin: one-call platform overview
+
+If your account's email is in `ADMIN_EMAILS`, the same session cookie reaches the admin API — no API key:
+
+```bash
+curl -s -b cookies.txt "$BASE/api/internal/admin/overview?days=30"
+# -> { window, companies, jobs{purchases,scrubs}, revenue, recent_jobs[], recent_activity[] }
+```
+
+Server-to-server (e.g. the CX3 Dashboard) uses the API key instead of a cookie:
+
+```bash
+curl -s -H "X-Internal-Api-Key: $INTERNAL_API_KEY" \
+  "$BASE/api/internal/admin/overview?days=30"
+```
+
+Other useful admin/internal reads: `/api/internal/admin/reports/summary`,
+`/reports/daily-sales`, `/reports/jobs`, and `/api/internal/activity?company_id=<id>`.
 
 ---
 
