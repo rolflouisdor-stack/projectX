@@ -1,5 +1,5 @@
 """Server-rendered HTML pages for the Mailer Portal."""
-from flask import Blueprint, render_template, redirect, g
+from flask import Blueprint, render_template, redirect, g, current_app
 from app.auth.decorators import mailer_login_required, current_user_or_none
 
 views_bp = Blueprint('views', __name__)
@@ -37,7 +37,10 @@ def dashboard():
 @views_bp.route('/scrub')
 @mailer_login_required
 def scrub_page():
-    return render_template('scrub.html', **_common_ctx(g.current_user, g.current_company))
+    # EO flow (clean via EmailOversight) vs legacy mock-scrub flow drives which
+    # wizard steps render. Off until EO_FTP_ENABLED is set.
+    return render_template('scrub.html', eo_enabled=bool(current_app.config.get('EO_FTP_ENABLED')),
+                           **_common_ctx(g.current_user, g.current_company))
 
 
 @views_bp.route('/buy')

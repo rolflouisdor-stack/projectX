@@ -12,15 +12,15 @@
 <div class="pp-page-header">
     <div>
         <a href="/dashboard" class="pp-text-sm pp-text-muted" style="display:inline-block; margin-bottom: 6px;">← Back to dashboard</a>
-        <h1 class="pp-page-title">Scrub a list</h1>
-        <p class="pp-page-sub">Upload your list, map your columns, and we'll tell you which records are unique against our premium data — you only pay for those.</p>
+        <h1 class="pp-page-title">{% if eo_enabled %}Clean a list{% else %}Scrub a list{% endif %}</h1>
+        <p class="pp-page-sub">{% if eo_enabled %}Upload your list, confirm which column holds the email, and we'll validate every record and return a cleaned file with each email's deliverability status.{% else %}Upload your list, map your columns, and we'll tell you which records are unique against our premium data — you only pay for those.{% endif %}</p>
     </div>
 </div>
 
 <div class="pp-stepper" id="stepper">
     <div class="pp-step active" data-step="1"><span class="pp-step-dot">1</span><span class="pp-step-label">Upload list</span></div>
     <div class="pp-step-bar"></div>
-    <div class="pp-step" data-step="2"><span class="pp-step-dot">2</span><span class="pp-step-label">Map columns</span></div>
+    <div class="pp-step" data-step="2"><span class="pp-step-dot">2</span><span class="pp-step-label">{% if eo_enabled %}Confirm email{% else %}Map columns{% endif %}</span></div>
     <div class="pp-step-bar"></div>
     <div class="pp-step" data-step="3"><span class="pp-step-dot">3</span><span class="pp-step-label">Processing</span></div>
     <div class="pp-step-bar"></div>
@@ -45,6 +45,7 @@
         </label>
         <div id="fileChosen"></div>
 
+        {% if not eo_enabled %}
         <div class="pp-opt-toggle checked" id="cleanToggle">
             <div class="pp-opt-check">✓</div>
             <div class="pp-opt-text">
@@ -52,6 +53,7 @@
                 <div class="pp-opt-sub">Real-time validation. Removes invalid, undeliverable, and disposable addresses <strong>before</strong> scrubbing. Pricing premium: <strong>+20%</strong>.</div>
             </div>
         </div>
+        {% endif %}
 
         <!-- Upload progress (hidden until the user clicks Start scrub) -->
         <div id="uploadProgressWrap" style="display:none; margin-top: 16px;">
@@ -65,7 +67,7 @@
         <div class="pp-divider"></div>
         <div class="pp-flex-between">
             <a href="/dashboard" class="pp-btn pp-btn-secondary">← Cancel</a>
-            <button class="pp-btn pp-btn-primary pp-btn-lg" id="step1Next" disabled>Start scrub →</button>
+            <button class="pp-btn pp-btn-primary pp-btn-lg" id="step1Next" disabled>{% if eo_enabled %}Continue →{% else %}Start scrub →{% endif %}</button>
         </div>
     </div>
 </section>
@@ -73,14 +75,25 @@
 <!-- Step 2: Map columns -->
 <section class="pp-step-pane" data-pane="2" style="display:none;">
     <div class="pp-card">
+        <div id="mappingError" class="pp-text-sm" style="display:none; color:#c0392b; margin: 8px 0 14px;"></div>
+
+        {% if eo_enabled %}
+        <div class="pp-card-title">Confirm your email column</div>
+        <p class="pp-card-sub" style="margin-top:-8px;">
+            We'll validate the emails in your list and return a cleaned file with every record's deliverability
+            status. Just tell us which column holds the email address — all your other columns are kept as-is.
+        </p>
+        <div class="pp-form-row" style="max-width:520px;">
+            <label class="pp-label">Email column</label>
+            <select class="pp-input" id="eoEmailCol" style="padding:10px 12px;"></select>
+            <div class="pp-text-sm pp-text-muted" id="eoEmailSample" style="margin-top:8px;"></div>
+        </div>
+        {% else %}
         <div class="pp-card-title">Map your columns</div>
         <p class="pp-card-sub" style="margin-top:-8px;">
             We detected these columns in your file. Match each one to a standard field, name it as a custom field,
             or skip it. We've pre-filled the obvious matches.
         </p>
-
-        <div id="mappingError" class="pp-text-sm" style="display:none; color:#c0392b; margin: 8px 0 14px;"></div>
-
         <div style="overflow-x:auto;">
             <table class="pp-table" id="mappingTable" style="width:100%;">
                 <thead>
@@ -95,11 +108,12 @@
                 <tbody id="mappingTbody"></tbody>
             </table>
         </div>
+        {% endif %}
 
         <div class="pp-divider"></div>
         <div class="pp-flex-between">
             <button class="pp-btn pp-btn-secondary" id="step2Back">← Re-upload</button>
-            <button class="pp-btn pp-btn-primary pp-btn-lg" id="step2Next">Confirm mapping →</button>
+            <button class="pp-btn pp-btn-primary pp-btn-lg" id="step2Next">{% if eo_enabled %}Get my price →{% else %}Confirm mapping →{% endif %}</button>
         </div>
     </div>
 </section>
@@ -107,14 +121,19 @@
 <!-- Step 3: Processing -->
 <section class="pp-step-pane" data-pane="3" style="display:none;">
     <div class="pp-card">
-        <div class="pp-card-title">Processing your list</div>
-        <p class="pp-card-sub" style="margin-top:-8px;">This runs in the background — large lists can take a few minutes. <strong>You can leave this page or close your browser;</strong> we'll email you the moment it's ready to review.</p>
+        <div class="pp-card-title">{% if eo_enabled %}Preparing your quote{% else %}Processing your list{% endif %}</div>
+        <p class="pp-card-sub" style="margin-top:-8px;">{% if eo_enabled %}We're reading your file and counting records to price your clean. This only takes a moment.{% else %}This runs in the background — large lists can take a few minutes. <strong>You can leave this page or close your browser;</strong> we'll email you the moment it's ready to review.{% endif %}</p>
 
         <div class="pp-progress-stages" id="stages">
+            {% if eo_enabled %}
+            <div class="pp-progress-stage" data-stage="importing"><div class="pp-stage-icon">1</div><div class="pp-stage-text"><div class="pp-stage-label">Reading your file</div><div class="pp-stage-sub">Loading your list from secure storage</div></div></div>
+            <div class="pp-progress-stage" data-stage="priced"><div class="pp-stage-icon">2</div><div class="pp-stage-text"><div class="pp-stage-label">Counting records + pricing</div><div class="pp-stage-sub">Calculating how many records we'll validate</div></div></div>
+            {% else %}
             <div class="pp-progress-stage" data-stage="importing"><div class="pp-stage-icon">1</div><div class="pp-stage-text"><div class="pp-stage-label">Importing rows</div><div class="pp-stage-sub">Reading your file and applying your column mapping</div></div></div>
             <div class="pp-progress-stage" data-stage="validating" id="cleanStage"><div class="pp-stage-icon">2</div><div class="pp-stage-text"><div class="pp-stage-label">Validating emails</div><div class="pp-stage-sub">Live SMTP check + disposable / role detection</div></div></div>
             <div class="pp-progress-stage" data-stage="scrubbing"><div class="pp-stage-icon">3</div><div class="pp-stage-text"><div class="pp-stage-label">Matching against premium data</div><div class="pp-stage-sub">Cross-referencing every record in our verticals</div></div></div>
             <div class="pp-progress-stage" data-stage="priced"><div class="pp-stage-icon">4</div><div class="pp-stage-text"><div class="pp-stage-label">Computing uniqueness + pricing</div><div class="pp-stage-sub">Calculating your final unique-record count</div></div></div>
+            {% endif %}
         </div>
 
         <div class="pp-progress-bar-outer"><div class="pp-progress-bar-inner" id="progressBar"></div></div>
@@ -128,6 +147,13 @@
 <!-- Step 4: Review -->
 <section class="pp-step-pane" data-pane="4" style="display:none;">
     <div class="pp-card">
+        {% if eo_enabled %}
+        <div class="pp-card-title">Your quote</div>
+        <p class="pp-card-sub" style="margin-top:-8px;">We'll validate every record with EmailOversight and return a cleaned file with each email's status. Pricing is <strong>per record</strong>.</p>
+        <div class="pp-result-grid">
+            <div class="pp-result-stat highlight"><div class="label">Records to clean</div><div class="value" id="rsUploaded">—</div></div>
+        </div>
+        {% else %}
         <div class="pp-card-title">Scrub results <span class="pp-badge pp-badge-success">Complete</span></div>
         <p class="pp-card-sub" style="margin-top:-8px;">Pricing is based on <strong>unique records</strong> only.</p>
 
@@ -137,6 +163,7 @@
             <div class="pp-result-stat highlight"><div class="label">Unique records</div><div class="value" id="rsUnique">—</div><div class="pp-text-sm pp-text-muted" id="rsUniquePct"></div></div>
             <div class="pp-result-stat"><div class="label">Already in your data</div><div class="value" id="rsOverlap">—</div><div class="pp-text-sm pp-text-muted">Not charged</div></div>
         </div>
+        {% endif %}
 
         <div class="pp-price-card">
             <div>
@@ -165,7 +192,11 @@
                 <div class="pp-form-row"><label class="pp-label">Cardholder name</label><input class="pp-input" type="text" placeholder="As on card"></div>
                 <div class="pp-form-row"><label class="pp-label">ZIP / Postal</label><input class="pp-input" type="text" placeholder="10001"></div>
             </div>
+            {% if eo_enabled %}
+            <p class="pp-text-sm pp-text-muted" style="margin-top:4px;">After you pay, your list goes to our validation partner (EmailOversight) for cleaning. This runs in a queue and can take anywhere from minutes to several hours depending on size. <strong>You can close this page</strong> — we'll email you when your cleaned file is ready to download.</p>
+            {% else %}
             <p class="pp-text-sm pp-text-muted" style="margin-top:4px;">After you pay, we build your downloadable file — this can take a few minutes for large lists. You can leave this page; we'll email you when it's ready to download.</p>
+            {% endif %}
             <div class="pp-divider"></div>
             <div class="pp-flex-between">
                 <button class="pp-btn pp-btn-secondary" data-prev>← Back to review</button>
@@ -176,9 +207,11 @@
             <div class="pp-card-title">Order summary</div>
             <table class="pp-table" style="margin: -8px -8px;">
                 <tbody>
-                    <tr><td class="pp-text-muted">Records uploaded</td><td class="number" id="osUploaded">—</td></tr>
+                    <tr><td class="pp-text-muted">{% if eo_enabled %}Records to clean{% else %}Records uploaded{% endif %}</td><td class="number" id="osUploaded">—</td></tr>
+                    {% if not eo_enabled %}
                     <tr id="osCleanRow" style="display:none;"><td class="pp-text-muted">Cleaning premium</td><td class="number">+20%</td></tr>
                     <tr><td class="pp-text-muted">Unique records</td><td class="number" id="osUnique">—</td></tr>
+                    {% endif %}
                     <tr><td class="pp-text-muted">Rate</td><td class="number" id="osRate">$0.00 / record</td></tr>
                     <tr style="font-weight:700;"><td>Total</td><td class="number money" id="osTotal">$0</td></tr>
                 </tbody>
@@ -190,17 +223,24 @@
 <!-- Step 6: Download -->
 <section class="pp-step-pane" data-pane="6" style="display:none;">
     <div class="pp-card" style="text-align:center; padding: 48px 32px;">
-        <div style="font-size: 56px; margin-bottom: 12px;">🎉</div>
-        <h2 class="pp-auth-title">Your file is ready!</h2>
-        <p class="pp-auth-sub">Payment confirmed. Your scrubbed list of unique records is ready to download.</p>
+        <div id="dlPending" style="display:none;">
+            <div style="font-size: 56px; margin-bottom: 12px;">⏳</div>
+            <h2 class="pp-auth-title">Cleaning your list…</h2>
+            <p class="pp-auth-sub">Payment confirmed. Your list is being validated by EmailOversight — this can take from a few minutes to several hours depending on size and the queue. <strong>You can safely close this page;</strong> we'll email you the moment your cleaned file is ready, and it'll be waiting in your <a href="/jobs">Job History</a>.</p>
+        </div>
+        <div id="dlReady">
+            <div style="font-size: 56px; margin-bottom: 12px;">🎉</div>
+            <h2 class="pp-auth-title">Your file is ready!</h2>
+            <p class="pp-auth-sub">{% if eo_enabled %}Your cleaned, validated list is ready to download.{% else %}Payment confirmed. Your scrubbed list of unique records is ready to download.{% endif %}</p>
 
-        <div class="pp-price-card" style="text-align:left; max-width: 520px; margin: 24px auto;">
-            <div>
-                <div class="pp-price-label">Filename</div>
-                <div style="font-size: 18px; font-weight: 700; margin-top: 6px;" id="dlFilename">—</div>
-                <div class="pp-price-detail"><span id="dlRows">— records</span> · Link expires in 1 hour</div>
+            <div class="pp-price-card" style="text-align:left; max-width: 520px; margin: 24px auto;">
+                <div>
+                    <div class="pp-price-label">Filename</div>
+                    <div style="font-size: 18px; font-weight: 700; margin-top: 6px;" id="dlFilename">—</div>
+                    <div class="pp-price-detail"><span id="dlRows">— records</span> · Link expires in 1 hour</div>
+                </div>
+                <a id="dlLink" href="#" class="pp-btn pp-btn-primary pp-btn-lg">Download {% if eo_enabled %}.csv{% else %}.xlsx{% endif %}</a>
             </div>
-            <a id="dlLink" href="#" class="pp-btn pp-btn-primary pp-btn-lg">Download .xlsx</a>
         </div>
 
         <div class="pp-divider"></div>
@@ -242,6 +282,9 @@ const state = {
     standardFields: [],
 };
 
+// EmailOversight cleaning flow vs legacy mock-scrub flow (set server-side).
+const EO_ENABLED = {{ 'true' if eo_enabled else 'false' }};
+
 function goToStep(n) {
     state.step = n;
     document.querySelectorAll('.pp-step').forEach(s => {
@@ -282,10 +325,16 @@ uploadZone.addEventListener('drop', e => {
     if (e.dataTransfer.files.length) { fileInput.files = e.dataTransfer.files; setFile(e.dataTransfer.files[0]); }
 });
 
+// The clean toggle only exists in the legacy mock-scrub flow. In the EO flow the
+// whole job is validation, so there's no opt-in and no +20% premium.
 const cleanToggle = document.getElementById('cleanToggle');
-function syncClean() { cleanToggle.classList.toggle('checked', state.clean); }
-cleanToggle.addEventListener('click', () => { state.clean = !state.clean; syncClean(); });
-syncClean();
+if (cleanToggle) {
+    const syncClean = () => cleanToggle.classList.toggle('checked', state.clean);
+    cleanToggle.addEventListener('click', () => { state.clean = !state.clean; syncClean(); });
+    syncClean();
+} else {
+    state.clean = false;
+}
 
 document.querySelectorAll('[data-prev]').forEach(b => b.addEventListener('click', () => goToStep(state.step - 1)));
 
@@ -348,7 +397,7 @@ document.getElementById('step1Next').addEventListener('click', async () => {
         state.suggested = detect.suggested_mapping;
         state.standardFields = detect.standard_fields;
 
-        renderMappingTable();
+        if (EO_ENABLED) renderEoConfirm(); else renderMappingTable();
         goToStep(2);
     } catch (e) {
         alert('Upload failed: ' + e.message);
@@ -357,7 +406,26 @@ document.getElementById('step1Next').addEventListener('click', async () => {
     }
 });
 
-// ── Step 2: mapping UI ───────────────────────────────────────────────────
+// ── Step 2 (EO flow): confirm the email column ────────────────────────────
+
+function renderEoConfirm() {
+    const sel = document.getElementById('eoEmailCol');
+    if (!sel) return;
+    // Pre-select the column our detector flagged as email, else the first.
+    let suggestedIdx = 0;
+    state.headers.forEach((h, i) => { if ((state.suggested[h] || '') === 'email') suggestedIdx = i; });
+    sel.innerHTML = state.headers.map((h, i) =>
+        `<option value="${i}"${i === suggestedIdx ? ' selected' : ''}>${escapeHtml(h)}</option>`).join('');
+    const showSample = () => {
+        const i = parseInt(sel.value, 10);
+        const vals = state.sampleRows.map(r => (r[i] || '')).filter(v => v !== '').slice(0, 3).join(', ');
+        document.getElementById('eoEmailSample').textContent = vals ? `Sample: ${vals}` : '';
+    };
+    sel.addEventListener('change', showSample);
+    showSample();
+}
+
+// ── Step 2 (legacy): mapping UI ───────────────────────────────────────────
 
 function renderMappingTable() {
     const tbody = document.getElementById('mappingTbody');
@@ -430,6 +498,7 @@ document.getElementById('step2Back').addEventListener('click', () => {
 });
 
 document.getElementById('step2Next').addEventListener('click', async () => {
+    if (EO_ENABLED) { confirmEoEmailColumn(); return; }
     const tbody = document.getElementById('mappingTbody');
     const mappings = [];
     const seenStandard = new Set();
@@ -481,6 +550,27 @@ document.getElementById('step2Next').addEventListener('click', async () => {
     submitMapping(mappings);
 });
 
+// EO flow: confirm the email column, then kick off the quote (count + price).
+async function confirmEoEmailColumn() {
+    const sel = document.getElementById('eoEmailCol');
+    const idx = parseInt(sel.value, 10);
+    const btn = document.getElementById('step2Next');
+    btn.disabled = true; const orig = btn.innerHTML; btn.textContent = 'Pricing…';
+    try {
+        await gmFetch(`/api/scrub-jobs/${state.job.id}/confirm-email`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email_column_index: idx }),
+        });
+        goToStep(3);
+        pollJob();
+    } catch (e) {
+        alert('Could not price your list: ' + e.message);
+    } finally {
+        btn.disabled = false; btn.innerHTML = orig;
+    }
+}
+
 let pendingMappings = null;
 
 async function submitMapping(mappings) {
@@ -527,7 +617,7 @@ async function pollJob() {
     const label = document.getElementById('progressLabel');
     const pct = document.getElementById('progressPct');
     const cleanStage = document.getElementById('cleanStage');
-    cleanStage.style.display = state.clean ? '' : 'none';
+    if (cleanStage) cleanStage.style.display = state.clean ? '' : 'none';
 
     const stages = Array.from(document.querySelectorAll('.pp-progress-stage'))
         .filter(el => el.style.display !== 'none');
@@ -578,6 +668,17 @@ async function pollJob() {
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
 function renderResults(job) {
+    if (EO_ENABLED) {
+        document.getElementById('rsUploaded').textContent = fmtNum(job.uploaded_count);
+        document.getElementById('rsPrice').textContent = fmtMoney(job.price_cents);
+        document.getElementById('rsPriceDetail').textContent =
+            `${fmtNum(job.uploaded_count)} records × $${job.rate_per_record.toFixed(4)}`;
+        document.getElementById('osUploaded').textContent = fmtNum(job.uploaded_count);
+        document.getElementById('osRate').textContent = `$${job.rate_per_record.toFixed(4)} / record`;
+        document.getElementById('osTotal').textContent = fmtMoney(job.price_cents);
+        document.getElementById('payAmount').textContent = fmtMoney(job.price_cents);
+        return;
+    }
     document.getElementById('rsUploaded').textContent = fmtNum(job.uploaded_count);
     document.getElementById('rsUnique').textContent = fmtNum(job.unique_count);
     document.getElementById('rsOverlap').textContent = fmtNum(job.overlap_count);
@@ -612,6 +713,13 @@ document.getElementById('step5Pay').addEventListener('click', async e => {
     btn.disabled = true; btn.textContent = 'Processing payment…';
     try {
         await gmFetch(`/api/scrub-jobs/${state.job.id}/pay`, { method: 'POST' });
+        if (EO_ENABLED) {
+            // Payment sends the list to EmailOversight via FTP for cleaning. EO is
+            // a slow FIFO queue (minutes to hours), so there's no file to hand over
+            // now — show the "cleaning in progress, we'll email you" state.
+            showEoPending();
+            return;
+        }
         // The result file is generated by the worker (off the request path), so
         // poll until the job is complete before handing over the download.
         btn.textContent = 'Generating your file…';
@@ -622,6 +730,13 @@ document.getElementById('step5Pay').addEventListener('click', async e => {
         btn.disabled = false; btn.innerHTML = orig;
     }
 });
+
+// EO flow: show step 6 in its "being cleaned" state (no download yet).
+function showEoPending() {
+    document.getElementById('dlPending').style.display = '';
+    document.getElementById('dlReady').style.display = 'none';
+    goToStep(6);
+}
 
 // Poll a paid job until its file is generated, then populate + show the
 // download step. Shared by the pay button and by resuming a generating job.
@@ -660,7 +775,7 @@ async function resumeJob(id) {
             state.sampleRows = detect.sample_rows;
             state.suggested = detect.suggested_mapping;
             state.standardFields = detect.standard_fields;
-            renderMappingTable();
+            if (EO_ENABLED) renderEoConfirm(); else renderMappingTable();
             goToStep(2);
         } catch (e) { alert('Could not resume mapping: ' + e.message); window.location.href = '/jobs'; }
     } else if (['importing', 'validating', 'scrubbing'].includes(st)) {
@@ -669,6 +784,9 @@ async function resumeJob(id) {
     } else if (st === 'priced' || st === 'awaiting_payment') {
         renderResults(job);
         goToStep(4);
+    } else if (st === 'submitting_ftp' || st === 'awaiting_ftp_result') {
+        // EO is cleaning the list — no download yet; we'll email when ready.
+        showEoPending();
     } else if (st === 'generating' || st === 'paid') {
         renderResults(job);
         goToStep(6);
@@ -684,7 +802,8 @@ async function resumeJob(id) {
         try {
             const dl = await gmFetch(`/api/scrub-jobs/${id}/download-url`);
             document.getElementById('dlFilename').textContent = job.result_filename || '—';
-            document.getElementById('dlRows').textContent = fmtNum(job.unique_count) + ' records';
+            document.getElementById('dlRows').textContent =
+                fmtNum(EO_ENABLED ? job.uploaded_count : job.unique_count) + ' records';
             document.getElementById('dlLink').href = dl.url;
         } catch (e) {}
         goToStep(6);

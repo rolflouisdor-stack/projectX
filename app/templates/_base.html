@@ -102,6 +102,8 @@
         priced:           { label: 'Ready to pay',     tip: 'Scrub finished and your quote is ready. Review and pay to unlock the download — this needs your input.' },
         awaiting_payment: { label: 'Awaiting payment', tip: 'Waiting for payment to unlock your download — this needs your input.' },
         paid:             { label: 'Paid',             tip: 'Payment received. Preparing your file — usually under a minute.' },
+        submitting_ftp:   { label: 'Sending to cleaner', tip: 'Securely sending your list to our validation partner (EmailOversight) for cleaning. A few moments.' },
+        awaiting_ftp_result: { label: 'Cleaning',       tip: 'Your list is being validated by our partner. This runs in a queue and can take from minutes to several hours depending on size. You can leave — we\'ll email you when your cleaned file is ready.' },
         generating:       { label: 'Generating file',  tip: 'Building your downloadable .xlsx file. Usually under a minute (a few minutes for very large lists). You can leave this page — check Job History and it will be ready to download.' },
         complete:         { label: 'Complete',         tip: 'Done! Your file is ready to download.' },
         failed:           { label: 'Failed',           tip: 'Something went wrong with this job. Open it for the reason, or contact support.' },
@@ -111,7 +113,7 @@
         const info = GM_STATUS_INFO[status] || { label: status, tip: '' };
         const cls = status === 'complete' ? 'pp-badge-success'
                   : status === 'failed' ? 'gm-failed'
-                  : (['awaiting_mapping', 'priced', 'awaiting_payment'].includes(status) ? 'pp-badge-info' : '');
+                  : (['awaiting_mapping', 'priced', 'awaiting_payment', 'awaiting_ftp_result'].includes(status) ? 'pp-badge-info' : '');
         const tip = String(info.tip || '').replace(/"/g, '&quot;');
         return `<span class="pp-badge gm-status ${cls}" data-tip="${tip}">${info.label || status}</span>`;
     }
