@@ -16,24 +16,42 @@ SCRUB_BASE_RATE = Decimal('0.018')        # $/unique-record
 SCRUB_CLEAN_PREMIUM = Decimal('1.20')     # +20% if cleaning opted-in
 
 
-def calc_eo_clean_price(record_count: int) -> dict:
-    """Price an EmailOversight cleaning job: per-record EO cost + our margin.
+def eo_margin_pct(record_count: int) -> Decimal:
+    """Our markup % for an EO clean, tiered by list size — bigger lists get a
+    smaller margin. Thresholds + percentages are config-tunable (see config.py).
+        < EO_TIER_MID_MIN (100k)          -> EO_MARGIN_PCT_SMALL (40%)
+        EO_TIER_MID_MIN .. <LARGE (150k)  -> EO_MARGIN_PCT_MID   (35%)
+        >= EO_TIER_LARGE_MIN (150k)       -> EO_MARGIN_PCT_LARGE (30%)
+    """
+    cfg = current_app.config
+    n = max(0, int(record_count or 0))
+    if n >= int(cfg.get('EO_TIER_LARGE_MIN') or 150_000):
+        return Decimal(str(cfg.get('EO_MARGIN_PCT_LARGE') or 30))
+    if n >= int(cfg.get('EO_TIER_MID_MIN') or 100_000):
+        return Decimal(str(cfg.get('EO_MARGIN_PCT_MID') or 35))
+    return Decimal(str(cfg.get('EO_MARGIN_PCT_SMALL') or 40))
 
-    Rate + margin come from config (EO_PRICE_PER_RECORD, EO_MARGIN_PCT) so they
-    can be tuned without a redeploy. We charge upfront on total record count;
-    EO doesn't bill us for 'Unknown' (code 11) rows, which nets as extra margin
-    (see FTP.md §12). Returns {rate_per_record, eo_cost_cents, price_cents}.
+
+def calc_eo_clean_price(record_count: int) -> dict:
+    """Price an EmailOversight cleaning job: per-record EO cost + tiered margin.
+
+    Rate (EO_PRICE_PER_RECORD) + the tiered margin come from config so they can
+    be tuned without a redeploy. We charge upfront on total record count; EO
+    doesn't bill us for 'Unknown' (code 11) rows, which nets as extra margin
+    (see FTP.md §12). Returns {rate_per_record, margin_pct, eo_cost_cents, price_cents}.
     """
     cfg = current_app.config
     eo_rate = Decimal(str(cfg.get('EO_PRICE_PER_RECORD') or 0))   # $/record EO charges us
-    margin = Decimal(str(cfg.get('EO_MARGIN_PCT') or 0)) / Decimal(100)
     n = max(0, int(record_count or 0))
+    margin_pct = eo_margin_pct(n)
+    margin = margin_pct / Decimal(100)
 
     eo_cost = Decimal(n) * eo_rate                       # our cost from EO ($)
     user_rate = eo_rate * (Decimal(1) + margin)          # $/record charged to user
     user_total = Decimal(n) * user_rate                  # user pays ($)
     return {
         'rate_per_record': float(user_rate),
+        'margin_pct': float(margin_pct),
         'eo_cost_cents': int(math.ceil(eo_cost * 100)),
         'price_cents': max(0, int(math.ceil(user_total * 100))),
     }

@@ -672,9 +672,9 @@ function renderResults(job) {
         document.getElementById('rsUploaded').textContent = fmtNum(job.uploaded_count);
         document.getElementById('rsPrice').textContent = fmtMoney(job.price_cents);
         document.getElementById('rsPriceDetail').textContent =
-            `${fmtNum(job.uploaded_count)} records × $${job.rate_per_record.toFixed(4)}`;
+            `${fmtNum(job.uploaded_count)} records × $${job.rate_per_record.toFixed(6)}`;
         document.getElementById('osUploaded').textContent = fmtNum(job.uploaded_count);
-        document.getElementById('osRate').textContent = `$${job.rate_per_record.toFixed(4)} / record`;
+        document.getElementById('osRate').textContent = `$${job.rate_per_record.toFixed(6)} / record`;
         document.getElementById('osTotal').textContent = fmtMoney(job.price_cents);
         document.getElementById('payAmount').textContent = fmtMoney(job.price_cents);
         return;

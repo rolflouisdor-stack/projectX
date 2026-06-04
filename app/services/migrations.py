@@ -92,6 +92,17 @@ def _modify_enum(engine, table: str, column: str, values: list):
         logger.warning("migrations: enum widen failed for %s.%s: %s", table, column, e)
 
 
+def _modify_column(engine, table: str, column: str, ddl: str):
+    """ALTER a column's type/shape (MySQL). Idempotent — MODIFY to the same
+    definition is a metadata no-op, so safe to re-run every boot."""
+    try:
+        with engine.begin() as conn:
+            conn.execute(text(f'ALTER TABLE `{table}` MODIFY COLUMN `{column}` {ddl}'))
+        logger.info("migrations: modified %s.%s -> %s", table, column, ddl)
+    except Exception as e:
+        logger.warning("migrations: column modify failed for %s.%s: %s", table, column, e)
+
+
 def run_migrations(engine):
     """Apply every known patch. Skips MySQL-specific patches on other dialects."""
     dialect = engine.dialect.name
@@ -120,6 +131,10 @@ def run_migrations(engine):
     _add_column(engine, 'scrub_jobs', 'ftp_processed_filename', 'VARCHAR(255) NULL')
     _add_column(engine, 'scrub_jobs', 'ftp_submitted_at', 'DATETIME NULL')
     _add_column(engine, 'scrub_jobs', 'ftp_result_ingested_at', 'DATETIME NULL')
+
+    # EO per-record rates are sub-cent ($0.000375 + tiered margin); 4dp rounds
+    # them all to 0.0005. Widen so the stored/displayed rate is accurate.
+    _modify_column(engine, 'scrub_jobs', 'rate_per_record', 'DECIMAL(12,6) DEFAULT 0')
 
     # Expand the status enum with the two new states (awaiting_mapping, importing,
     # plus the new uploading state for in-flight uploads). Keep all the

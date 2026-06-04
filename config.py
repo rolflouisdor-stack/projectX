@@ -94,10 +94,18 @@ class Config:
     EO_FTP_PROCESSED_DIR = os.getenv('EO_FTP_PROCESSED_DIR', 'processed')
     EO_FTP_FILENAME_PREFIX = os.getenv('EO_FTP_FILENAME_PREFIX', 'mailer-')
 
-    # Pricing for EO cleaning: user pays per-record EO cost + our margin.
-    # price_cents = ceil(records * EO_PRICE_PER_RECORD * (1 + EO_MARGIN_PCT/100) * 100)
-    EO_PRICE_PER_RECORD = float(os.getenv('EO_PRICE_PER_RECORD', 0))   # $/record EO charges us (set when known)
-    EO_MARGIN_PCT = float(os.getenv('EO_MARGIN_PCT', 35))             # our markup %
+    # Pricing for EO cleaning: user pays per-record EO cost + our margin. The
+    # margin is tiered by list size (bigger lists get a smaller markup):
+    #   < 100k records        -> EO_MARGIN_PCT_SMALL  (40%)
+    #   100k .. <150k records -> EO_MARGIN_PCT_MID    (35%)
+    #   >= 150k records       -> EO_MARGIN_PCT_LARGE  (30%)
+    # price_cents = ceil(records * EO_PRICE_PER_RECORD * (1 + margin/100) * 100)
+    EO_PRICE_PER_RECORD = float(os.getenv('EO_PRICE_PER_RECORD', 0.000375))  # $/record EO charges us
+    EO_MARGIN_PCT_SMALL = float(os.getenv('EO_MARGIN_PCT_SMALL', 40))        # < 100k records
+    EO_MARGIN_PCT_MID = float(os.getenv('EO_MARGIN_PCT_MID', 35))            # 100k .. <150k
+    EO_MARGIN_PCT_LARGE = float(os.getenv('EO_MARGIN_PCT_LARGE', 30))        # >= 150k
+    EO_TIER_MID_MIN = int(os.getenv('EO_TIER_MID_MIN', 100_000))             # small -> mid threshold
+    EO_TIER_LARGE_MIN = int(os.getenv('EO_TIER_LARGE_MIN', 150_000))         # mid -> large threshold
 
 
 class DevelopmentConfig(Config):

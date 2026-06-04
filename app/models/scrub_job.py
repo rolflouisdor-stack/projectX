@@ -64,7 +64,7 @@ class ScrubJob(Base):
     unique_count = Column(Integer, default=0)
     overlap_count = Column(Integer, default=0)
 
-    rate_per_record = Column(Numeric(10, 4), default=0)
+    rate_per_record = Column(Numeric(12, 6), default=0)   # 6dp: EO rates are sub-cent ($0.000375 + tiered margin)
     price_cents = Column(BigInteger, default=0)
     stripe_payment_intent_id = Column(String(120), nullable=True)
     paid_at = Column(DateTime, nullable=True)
