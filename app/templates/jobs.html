@@ -52,6 +52,8 @@ function scrubAction(s) {
         case 'scrubbing':
         case 'generating':
         case 'paid':
+        case 'submitting_ftp':
+        case 'awaiting_ftp_result':
             return `<a href="/scrub?job=${s.id}" class="pp-btn pp-btn-secondary pp-btn-sm">View progress</a>`;
         case 'failed':
             return `<a href="/scrub" class="pp-btn pp-btn-ghost pp-btn-sm">Start over</a>`;
@@ -93,9 +95,21 @@ async function loadJobs() {
                 <td class="number">${fmtNum(s.unique_count)}</td>
                 <td class="number money">${fmtMoney(s.price_cents)}</td>
                 <td>${gmStatusBadge(s.status)}</td>
-                <td>${dl}</td>
+                <td><div class="pp-flex" style="gap:6px; justify-content:flex-end; align-items:center;">${dl}<button class="pp-btn pp-btn-ghost pp-btn-sm" onclick="deleteJob(${s.id})">Delete</button></div></td>
             </tr>`;
         }).join('');
+}
+
+// Permanently delete a scrub job (DB row + its Spaces files) via the API.
+async function deleteJob(id) {
+    if (!confirm('Delete this scrub job? This permanently removes the job and its '
+               + 'uploaded and cleaned files. This cannot be undone.')) return;
+    try {
+        await gmFetch(`/api/scrub-jobs/${id}`, { method: 'DELETE' });
+        loadJobs();
+    } catch (e) {
+        alert('Could not delete this job: ' + e.message);
+    }
 }
 document.addEventListener('DOMContentLoaded', loadJobs);
 </script>

@@ -19,6 +19,7 @@ ACTION_BUY_INIT       = 'buy_init'
 ACTION_PURCHASE       = 'purchase'           # payment captured
 ACTION_DOWNLOAD       = 'download'           # file actually downloaded
 ACTION_APPLY_PROMO    = 'apply_promo'
+ACTION_DELETE_JOB     = 'delete_job'         # scrub job + its Spaces files removed
 
 
 class ActivityLog(Base):

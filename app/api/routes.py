@@ -19,7 +19,7 @@ from app.models.promo_banner import PromoBanner
 from app.models.activity_log import (
     ACTION_TRACK_VERTICAL, ACTION_VIEW_DASHBOARD,
     ACTION_UPLOAD_LIST, ACTION_RUN_SCRUB, ACTION_BUY_INIT,
-    ACTION_PURCHASE, ACTION_DOWNLOAD, ACTION_APPLY_PROMO,
+    ACTION_PURCHASE, ACTION_DOWNLOAD, ACTION_APPLY_PROMO, ACTION_DELETE_JOB,
 )
 from app.services.activity_logger import log_activity
 from app.services.pricing import calc_purchase_quote
@@ -379,6 +379,42 @@ def get_scrub_job(job_id):
     if not job:
         return jsonify({'error': 'not found'}), 404
     return jsonify(job.to_dict())
+
+
+@api_bp.route('/scrub-jobs/<int:job_id>', methods=['DELETE'])
+@mailer_login_required
+def delete_scrub_job(job_id):
+    """Permanently delete a scrub job: its Spaces objects (upload + result) AND
+    the DB row (child rows cascade). Scoped to the caller's company, so a user
+    can only delete their own jobs. Spaces cleanup is best-effort — a storage
+    hiccup must not block removing the row (else it can never be retried)."""
+    db = get_db()
+    company = g.current_company
+    job = db.query(ScrubJob).filter_by(id=job_id, company_id=company.id).first()
+    if not job:
+        return jsonify({'error': 'not found'}), 404
+
+    # Wipe the whole per-job object tree (upload + result + any multipart
+    # fragments), not just the two known keys.
+    spaces_deleted = 0
+    for prefix in (f'uploads/{company.id}/{job.id}/', f'results/{company.id}/{job.id}/'):
+        try:
+            spaces_deleted += storage.delete_prefix(prefix)
+        except Exception:
+            logger.exception("delete_scrub_job: Spaces cleanup failed for %s", prefix)
+
+    fname = job.original_filename
+    db.delete(job)          # FK ON DELETE CASCADE clears child rows
+    db.commit()
+
+    log_activity(
+        company.id, ACTION_DELETE_JOB,
+        user_id=g.current_user.id, scrub_job_id=job_id,
+        meta={'filename': fname, 'spaces_objects_deleted': spaces_deleted},
+    )
+    logger.info("deleted scrub_job %s (company %s), %s Spaces object(s)",
+                job_id, company.id, spaces_deleted)
+    return jsonify({'deleted': True, 'id': job_id, 'spaces_objects_deleted': spaces_deleted})
 
 
 @api_bp.route('/scrub-jobs/<int:job_id>/pay', methods=['POST'])
