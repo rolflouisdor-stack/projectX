@@ -11,6 +11,7 @@ class MailerCompany(Base):
     company_name = Column(String(120), nullable=False, unique=True)
     status = Column(Enum('pending', 'active', 'suspended', name='mailer_company_status'),
                     default='active')
+    stripe_customer_id = Column(String(100), nullable=True)   # Stripe Customer for saved cards / charges
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

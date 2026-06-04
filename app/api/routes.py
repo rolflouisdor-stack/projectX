@@ -24,7 +24,8 @@ from app.models.activity_log import (
 from app.services.activity_logger import log_activity
 from app.services.pricing import calc_purchase_quote
 from app.services.xlsx_generator import generate_purchase_artifact
-from app.services.stripe_stub import create_payment_intent
+from app.services import stripe_service
+from app.services.stripe_service import create_payment_intent
 from app.services import storage
 from app.services.header_detector import detect_from_s3
 from app.jobs.queue import (
@@ -417,34 +418,22 @@ def delete_scrub_job(job_id):
     return jsonify({'deleted': True, 'id': job_id, 'spaces_objects_deleted': spaces_deleted})
 
 
-@api_bp.route('/scrub-jobs/<int:job_id>/pay', methods=['POST'])
-@mailer_login_required
-def pay_scrub_job(job_id):
-    db = get_db()
-    job = db.query(ScrubJob).filter_by(id=job_id, company_id=g.current_company.id).first()
-    if not job:
-        return jsonify({'error': 'not found'}), 404
-    if job.status not in ('priced', 'awaiting_payment'):
-        return jsonify({'error': f'job is in status {job.status}'}), 409
-
-    # ── EmailOversight flow: on payment, hand the file to EO for cleaning ──
+def _advance_paid_scrub_job(db, job):
+    """Move a PAID scrub job forward — EO submit (EO flow) or artifact build
+    (legacy). Idempotent: a no-op if already advanced, so the sync stub path and
+    the Stripe webhook can both call it safely. Uses job.* (no request context)."""
     from flask import current_app
-    if current_app.config.get('EO_FTP_ENABLED'):
-        if job.email_column_index is None or int(job.uploaded_count or 0) <= 0:
-            return jsonify({'error': "This list has nothing to clean (no email column "
-                            "confirmed, or zero records). Please start a new scrub."}), 400
-        intent = create_payment_intent(int(job.price_cents or 0),
-                                       description=f'Gravitas clean #{job.id}')
-        job.stripe_payment_intent_id = intent['id']
+    if job.status in ('submitting_ftp', 'awaiting_ftp_result', 'generating', 'complete'):
+        return
+    if not job.paid_at:
         job.paid_at = datetime.utcnow()
-        job.status = 'submitting_ftp'   # worker uploads to EO + polls for the result
+
+    if current_app.config.get('EO_FTP_ENABLED'):
+        job.status = 'submitting_ftp'
         db.commit()
-        log_activity(
-            g.current_company.id, ACTION_PURCHASE,
-            user_id=g.current_user.id, scrub_job_id=job.id,
-            meta={'price_cents': job.price_cents, 'records': job.uploaded_count,
-                  'stripe_intent': intent['id'], 'kind': 'scrub-clean'},
-        )
+        log_activity(job.company_id, ACTION_PURCHASE, user_id=job.user_id, scrub_job_id=job.id,
+                     meta={'price_cents': job.price_cents, 'records': job.uploaded_count,
+                           'stripe_intent': job.stripe_payment_intent_id, 'kind': 'scrub-clean'})
         try:
             enqueue_eo_submit(job.id)
         except Exception as e:
@@ -452,50 +441,83 @@ def pay_scrub_job(job_id):
             job.status = 'failed'
             job.failure_reason = f'could not start cleaning: {e}'[:500]
             db.commit()
-            return jsonify({'error': 'could not start cleaning'}), 503
-        return jsonify(job.to_dict())
-
-    # ── Legacy mock-scrub flow (when EO is off) ──
-    # Guard *before* charging: a job with no kept columns (e.g. a file with no
-    # email column, everything skipped) or zero unique records has nothing to
-    # build or sell. Fail clearly here instead of charging and then dying in the
-    # artifact worker with "no field mappings".
-    kept_cols = (db.query(ScrubJobFieldMapping)
-                 .filter_by(scrub_job_id=job.id, skip=False).count())
-    if kept_cols == 0:
-        return jsonify({'error': "This scrub can't be downloaded because no columns were "
-                        "mapped (an email column is required). Please start a new scrub and "
-                        "map your email column."}), 400
-    if int(job.unique_count or 0) <= 0:
-        return jsonify({'error': "No unique records were found for this list, so there's "
-                        "nothing to download — you have not been charged."}), 400
-
-    intent = create_payment_intent(int(job.price_cents or 0),
-                                   description=f'Gravitas scrub #{job.id}')
-    job.stripe_payment_intent_id = intent['id']
-    job.paid_at = datetime.utcnow()
-    # Payment captured. Building the result xlsx reads every unique record and
-    # uploads it — too slow for the web request on large jobs — so hand it to
-    # the worker and let the client poll. Status: priced -> generating -> complete.
-    job.status = 'generating'
-    db.commit()
-
-    log_activity(
-        g.current_company.id, ACTION_PURCHASE,
-        user_id=g.current_user.id, scrub_job_id=job.id,
-        meta={'price_cents': job.price_cents, 'unique': job.unique_count,
-              'stripe_intent': intent['id'], 'kind': 'scrub'},
-    )
-
-    try:
-        enqueue_generate_scrub_artifact(job.id)
-    except Exception as e:
-        logger.exception("could not enqueue artifact generation for job %s", job.id)
-        job.status = 'failed'
-        job.failure_reason = f'could not start file generation: {e}'[:500]
+    else:
+        job.status = 'generating'
         db.commit()
-        return jsonify({'error': 'could not start file generation'}), 503
+        log_activity(job.company_id, ACTION_PURCHASE, user_id=job.user_id, scrub_job_id=job.id,
+                     meta={'price_cents': job.price_cents, 'unique': job.unique_count,
+                           'stripe_intent': job.stripe_payment_intent_id, 'kind': 'scrub'})
+        try:
+            enqueue_generate_scrub_artifact(job.id)
+        except Exception as e:
+            logger.exception("could not enqueue artifact generation for job %s", job.id)
+            job.status = 'failed'
+            job.failure_reason = f'could not start file generation: {e}'[:500]
+            db.commit()
 
+
+@api_bp.route('/scrub-jobs/<int:job_id>/pay', methods=['POST'])
+@mailer_login_required
+def pay_scrub_job(job_id):
+    """Charge for a scrub. With Stripe ON: create a PaymentIntent and return its
+    client_secret; the job only advances on the `payment_intent.succeeded`
+    webhook. With Stripe OFF (stub): advance immediately."""
+    from flask import current_app
+    db = get_db()
+    job = db.query(ScrubJob).filter_by(id=job_id, company_id=g.current_company.id).first()
+    if not job:
+        return jsonify({'error': 'not found'}), 404
+    if job.status not in ('priced', 'awaiting_payment'):
+        return jsonify({'error': f'job is in status {job.status}'}), 409
+
+    # Guard *before* charging — nothing to clean / sell ⇒ fail fast, no charge.
+    if current_app.config.get('EO_FTP_ENABLED'):
+        if job.email_column_index is None or int(job.uploaded_count or 0) <= 0:
+            return jsonify({'error': "This list has nothing to clean (no email column "
+                            "confirmed, or zero records). Please start a new scrub."}), 400
+        desc = f'Gravitas clean #{job.id}'
+    else:
+        kept_cols = (db.query(ScrubJobFieldMapping)
+                     .filter_by(scrub_job_id=job.id, skip=False).count())
+        if kept_cols == 0:
+            return jsonify({'error': "This scrub can't be downloaded because no columns were "
+                            "mapped (an email column is required). Please start a new scrub and "
+                            "map your email column."}), 400
+        if int(job.unique_count or 0) <= 0:
+            return jsonify({'error': "No unique records were found for this list, so there's "
+                            "nothing to download — you have not been charged."}), 400
+        desc = f'Gravitas scrub #{job.id}'
+
+    customer_id = None
+    if stripe_service.enabled():
+        customer_id = stripe_service.ensure_customer(g.current_company)
+        g.current_company.stripe_customer_id = customer_id
+
+    intent = create_payment_intent(
+        int(job.price_cents or 0), description=desc,
+        metadata={'kind': 'scrub', 'job_id': job.id, 'company_id': job.company_id},
+        customer_id=customer_id,
+    )
+    job.stripe_payment_intent_id = intent['id']
+
+    if stripe_service.enabled():
+        # Async: the webhook advances the job once Stripe confirms the charge.
+        job.status = 'awaiting_payment'
+        db.commit()
+        return jsonify({
+            'requires_payment': True,
+            'client_secret': intent['client_secret'],
+            'publishable_key': stripe_service.publishable_key(),
+            'amount_cents': int(job.price_cents or 0),
+            'job': job.to_dict(),
+        })
+
+    # Stub: instant success → advance now.
+    job.paid_at = datetime.utcnow()
+    db.commit()
+    _advance_paid_scrub_job(db, job)
+    if job.status == 'failed':
+        return jsonify({'error': job.failure_reason or 'could not start processing'}), 503
     return jsonify(job.to_dict())
 
 
@@ -573,8 +595,31 @@ def get_purchase_job(job_id):
 
 
 @api_bp.route('/purchase-jobs/<int:job_id>/pay', methods=['POST'])
+def _complete_paid_purchase_job(db, job):
+    """Generate the result file + mark a PAID purchase complete. Idempotent, no
+    request context — safe from the stub path or the Stripe webhook."""
+    if job.status == 'complete':
+        return
+    if not job.paid_at:
+        job.paid_at = datetime.utcnow()
+    job.status = 'paid'
+    db.flush()
+    filename, s3_key = generate_purchase_artifact(job)
+    job.result_filename = filename
+    job.result_s3_key = s3_key
+    job.status = 'complete'
+    job.completed_at = datetime.utcnow()
+    db.commit()
+    log_activity(job.company_id, ACTION_PURCHASE, user_id=job.user_id, purchase_job_id=job.id,
+                 meta={'price_cents': job.price_cents, 'volume': job.volume,
+                       'verticals': [v.get('vertical_id') for v in (job.selected_verticals_json or [])],
+                       'stripe_intent': job.stripe_payment_intent_id, 'kind': 'purchase'})
+
+
 @mailer_login_required
 def pay_purchase_job(job_id):
+    """Charge for a records purchase. Stripe ON: PaymentIntent → client_secret,
+    completed on webhook. Stripe OFF (stub): generate + complete now."""
     db = get_db()
     job = db.query(PurchaseJob).filter_by(id=job_id, company_id=g.current_company.id).first()
     if not job:
@@ -582,27 +627,30 @@ def pay_purchase_job(job_id):
     if job.status not in ('awaiting_payment', 'priced'):
         return jsonify({'error': f'job is in status {job.status}'}), 409
 
-    intent = create_payment_intent(int(job.price_cents or 0),
-                                   description=f'Gravitas purchase #{job.id}')
-    job.stripe_payment_intent_id = intent['id']
-    job.status = 'paid'
-    job.paid_at = datetime.utcnow()
-    db.flush()
+    customer_id = None
+    if stripe_service.enabled():
+        customer_id = stripe_service.ensure_customer(g.current_company)
+        g.current_company.stripe_customer_id = customer_id
 
-    filename, s3_key = generate_purchase_artifact(job)
-    job.result_filename = filename
-    job.result_s3_key = s3_key
-    job.status = 'complete'
-    job.completed_at = datetime.utcnow()
-    db.commit()
-
-    log_activity(
-        g.current_company.id, ACTION_PURCHASE,
-        user_id=g.current_user.id, purchase_job_id=job.id,
-        meta={'price_cents': job.price_cents, 'volume': job.volume,
-              'verticals': [v.get('vertical_id') for v in (job.selected_verticals_json or [])],
-              'stripe_intent': intent['id'], 'kind': 'purchase'},
+    intent = create_payment_intent(
+        int(job.price_cents or 0), description=f'Gravitas purchase #{job.id}',
+        metadata={'kind': 'purchase', 'job_id': job.id, 'company_id': job.company_id},
+        customer_id=customer_id,
     )
+    job.stripe_payment_intent_id = intent['id']
+
+    if stripe_service.enabled():
+        job.status = 'awaiting_payment'
+        db.commit()
+        return jsonify({
+            'requires_payment': True,
+            'client_secret': intent['client_secret'],
+            'publishable_key': stripe_service.publishable_key(),
+            'amount_cents': int(job.price_cents or 0),
+            'job': job.to_dict(),
+        })
+
+    _complete_paid_purchase_job(db, job)
     return jsonify(job.to_dict())
 
 
@@ -692,3 +740,87 @@ def list_jobs():
         'scrub_jobs': [s.to_dict() for s in scrubs],
         'purchase_jobs': [p.to_dict() for p in purchases],
     })
+
+
+# ── Stripe config + webhook ─────────────────────────────────────────────────
+
+@api_bp.route('/stripe/config', methods=['GET'])
+@mailer_login_required
+def stripe_config():
+    """Tell the front-end whether real Stripe is on + the publishable key, so it
+    knows to mount the Payment Element vs. the stub instant-pay."""
+    return jsonify({
+        'enabled': stripe_service.enabled(),
+        'publishable_key': stripe_service.publishable_key(),
+    })
+
+
+@api_bp.route('/stripe/webhook', methods=['POST'])
+def stripe_webhook():
+    """Stripe's authoritative payment signal. Verifies the signature, then
+    advances the matching job (idempotently). No session — Stripe calls this."""
+    payload = request.get_data()
+    sig = request.headers.get('Stripe-Signature', '')
+    try:
+        event = stripe_service.construct_event(payload, sig)
+    except Exception as e:
+        logger.warning("stripe webhook signature/parse failed: %s", e)
+        return jsonify({'error': 'invalid signature'}), 400
+
+    etype = event['type']
+    obj = event['data']['object']
+    db = get_db()
+    try:
+        if etype == 'payment_intent.succeeded':
+            pid = obj['id']
+            meta = obj.get('metadata') or {}
+            kind = meta.get('kind')
+            if kind == 'purchase':
+                job = db.query(PurchaseJob).filter_by(stripe_payment_intent_id=pid).first()
+                if job:
+                    _complete_paid_purchase_job(db, job)
+            else:  # scrub (EO or legacy — _advance decides by config)
+                job = db.query(ScrubJob).filter_by(stripe_payment_intent_id=pid).first()
+                if job:
+                    if not job.paid_at:
+                        job.paid_at = datetime.utcnow()
+                        db.commit()
+                    _advance_paid_scrub_job(db, job)
+            logger.info("stripe webhook: payment_intent.succeeded %s (kind=%s)", pid, kind)
+
+        elif etype == 'setup_intent.succeeded':
+            _store_setup_intent_payment_method(db, obj)
+            logger.info("stripe webhook: setup_intent.succeeded %s", obj.get('id'))
+
+    except Exception:
+        logger.exception("stripe webhook handling failed for %s", etype)
+        return jsonify({'error': 'handler error'}), 500   # let Stripe retry
+
+    return jsonify({'received': True})
+
+
+def _store_setup_intent_payment_method(db, setup_intent):
+    """Persist the card a customer just saved via a SetupIntent. Backstops the
+    client confirm-step so a saved card is never lost."""
+    from app.models.mailer_company import MailerCompany
+    from app.models.payment_method import PaymentMethod
+    pm_id = setup_intent.get('payment_method')
+    customer_id = setup_intent.get('customer')
+    if not pm_id or not customer_id:
+        return
+    company = db.query(MailerCompany).filter_by(stripe_customer_id=customer_id).first()
+    if not company:
+        return
+    fields = stripe_service.pm_card_fields(stripe_service.retrieve_payment_method(pm_id))
+    pm = db.query(PaymentMethod).filter_by(company_id=company.id).first()
+    if pm is None:
+        pm = PaymentMethod(company_id=company.id)
+        db.add(pm)
+    pm.brand = fields['brand']
+    pm.last4 = fields['last4']
+    pm.exp_month = fields['exp_month']
+    pm.exp_year = fields['exp_year']
+    pm.cardholder_name = fields.get('cardholder_name')
+    pm.stripe_payment_method_id = pm_id
+    pm.updated_at = datetime.utcnow()
+    db.commit()

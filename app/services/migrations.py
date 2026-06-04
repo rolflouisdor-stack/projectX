@@ -136,6 +136,9 @@ def run_migrations(engine):
     # them all to 0.0005. Widen so the stored/displayed rate is accurate.
     _modify_column(engine, 'scrub_jobs', 'rate_per_record', 'DECIMAL(12,6) DEFAULT 0')
 
+    # Stripe Customer id per company (saved cards + off-session charges).
+    _add_column(engine, 'mailer_companies', 'stripe_customer_id', 'VARCHAR(100) NULL')
+
     # Expand the status enum with the two new states (awaiting_mapping, importing,
     # plus the new uploading state for in-flight uploads). Keep all the
     # historical values so existing rows stay valid.

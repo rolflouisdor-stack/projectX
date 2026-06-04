@@ -13,7 +13,8 @@ from app.auth.decorators import mailer_login_required
 from app.models.mailer_user import MailerUser
 from app.models.mailer_company import MailerCompany
 from app.models.payment_method import PaymentMethod
-from app.services.stripe_stub import (
+from app.services import stripe_service
+from app.services.stripe_service import (
     attach_payment_method,
     detach_payment_method,
     CardValidationError,
@@ -102,9 +103,69 @@ def update_company():
     return jsonify(company.to_dict())
 
 
+@account_bp.route('/payment-method/setup-intent', methods=['POST'])
+@mailer_login_required
+def payment_method_setup_intent():
+    """Begin saving a card via Stripe: ensure a Customer, create a SetupIntent,
+    return its client_secret for the on-page Stripe Element to confirm."""
+    if not stripe_service.enabled():
+        return _err('Card-on-file via Stripe is not enabled', 409)
+    db = get_db()
+    company = g.current_company
+    customer_id = stripe_service.ensure_customer(company)
+    if company.stripe_customer_id != customer_id:
+        company.stripe_customer_id = customer_id
+        db.commit()
+    si = stripe_service.create_setup_intent(customer_id)
+    return jsonify({'client_secret': si['client_secret'],
+                    'publishable_key': stripe_service.publishable_key()})
+
+
+@account_bp.route('/payment-method/confirm', methods=['POST'])
+@mailer_login_required
+def confirm_payment_method():
+    """After the client confirms the SetupIntent, persist the resulting card.
+    (The setup_intent.succeeded webhook is a backstop for the same write.)"""
+    if not stripe_service.enabled():
+        return _err('Card-on-file via Stripe is not enabled', 409)
+    data = request.get_json(silent=True) or {}
+    pm_id = (data.get('payment_method_id') or '').strip()
+    if not pm_id:
+        return _err('payment_method_id is required')
+    try:
+        fields = stripe_service.pm_card_fields(stripe_service.retrieve_payment_method(pm_id))
+    except Exception:
+        logger.exception('could not retrieve payment method %s', pm_id)
+        return _err('Could not read that card from Stripe', 502)
+
+    db = get_db()
+    pm = db.query(PaymentMethod).filter_by(company_id=g.current_company.id).first()
+    if pm is None:
+        pm = PaymentMethod(company_id=g.current_company.id)
+        db.add(pm)
+    elif pm.stripe_payment_method_id and pm.stripe_payment_method_id != pm_id:
+        try:
+            detach_payment_method(pm.stripe_payment_method_id)
+        except Exception:
+            logger.exception('Failed to detach previous payment method (non-fatal)')
+    pm.brand = fields['brand']
+    pm.last4 = fields['last4']
+    pm.exp_month = fields['exp_month']
+    pm.exp_year = fields['exp_year']
+    pm.cardholder_name = fields.get('cardholder_name')
+    pm.stripe_payment_method_id = pm_id
+    pm.updated_at = datetime.utcnow()
+    db.commit()
+    return jsonify(pm.to_dict())
+
+
 @account_bp.route('/payment-method', methods=['PUT'])
 @mailer_login_required
 def upsert_payment_method():
+    # When Stripe is on, raw card numbers must never hit our server — use the
+    # SetupIntent flow (/payment-method/setup-intent + /confirm) instead.
+    if stripe_service.enabled():
+        return _err('Use the secure card form (setup-intent) to save a card', 409)
     data = request.get_json(silent=True) or {}
     try:
         result = attach_payment_method(
