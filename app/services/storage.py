@@ -186,6 +186,44 @@ def head_object(key: str) -> dict:
     return get_client().head_object(Bucket=_config()['bucket'], Key=key)
 
 
+def delete_object(key: str) -> None:
+    get_client().delete_object(Bucket=_config()['bucket'], Key=key)
+
+
+def list_keys(prefix: str) -> list:
+    """All object keys under a prefix (paginated)."""
+    s3 = get_client()
+    bucket = _config()['bucket']
+    keys = []
+    token = None
+    while True:
+        kw = {'Bucket': bucket, 'Prefix': prefix}
+        if token:
+            kw['ContinuationToken'] = token
+        resp = s3.list_objects_v2(**kw)
+        keys.extend(o['Key'] for o in resp.get('Contents', []))
+        if not resp.get('IsTruncated'):
+            break
+        token = resp.get('NextContinuationToken')
+    return keys
+
+
+def delete_prefix(prefix: str) -> int:
+    """Delete every object under a prefix. Returns the count deleted. Guards
+    against an empty prefix so a bad call can't wipe the whole bucket."""
+    if not prefix or not prefix.strip('/'):
+        raise ValueError('delete_prefix requires a non-empty prefix')
+    s3 = get_client()
+    bucket = _config()['bucket']
+    keys = list_keys(prefix)
+    deleted = 0
+    for i in range(0, len(keys), 1000):   # DeleteObjects caps at 1000/req
+        batch = keys[i:i + 1000]
+        s3.delete_objects(Bucket=bucket, Delete={'Objects': [{'Key': k} for k in batch]})
+        deleted += len(batch)
+    return deleted
+
+
 def presign_get_url(key: str, filename: Optional[str] = None) -> str:
     """Presigned GET; if filename is given, S3 sets Content-Disposition so the
     browser downloads with that name instead of the raw key."""
