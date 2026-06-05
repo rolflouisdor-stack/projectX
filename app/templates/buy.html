@@ -443,7 +443,7 @@ document.getElementById('step3Pay').addEventListener('click', async e => {
         btn.disabled = true; btn.textContent = 'Processing…'; if (msg) msg.style.display = 'none';
         const { error } = await _stripe.confirmPayment({
             elements: _elements,
-            confirmParams: { return_url: `${window.location.origin}/buy` },
+            confirmParams: { return_url: `${window.location.origin}/buy?pjob=${state.job.id}` },
             redirect: 'if_required',
         });
         if (error) {
@@ -483,6 +483,17 @@ document.getElementById('step3Pay').addEventListener('click', async e => {
     }
 });
 
-document.addEventListener('DOMContentLoaded', loadVerticals);
+document.addEventListener('DOMContentLoaded', async () => {
+    await loadVerticals();
+    // Returning from a Stripe 3-D Secure redirect: finalize + show the download.
+    const params = new URLSearchParams(window.location.search);
+    const pjob = params.get('pjob');
+    if (pjob && /^\d+$/.test(pjob) && params.get('redirect_status') === 'succeeded') {
+        try {
+            const done = await gmFetch(`/api/purchase-jobs/${pjob}/payment-confirm`, { method: 'POST' });
+            showPurchaseDownload(done);
+        } catch (e) { /* webhook will finalize; job is in History */ }
+    }
+});
 </script>
 {% endblock %}

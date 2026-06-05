@@ -882,8 +882,22 @@ async function resumeJob(id) {
 // Deferred to DOMContentLoaded so the shared helpers (gmFetch) from _base.html,
 // whose <script> is parsed after this page's, are defined before we call them.
 document.addEventListener('DOMContentLoaded', function () {
-    const id = new URLSearchParams(window.location.search).get('job');
-    if (id && /^\d+$/.test(id)) resumeJob(id);
+    const params = new URLSearchParams(window.location.search);
+    const id = params.get('job');
+    if (!id || !/^\d+$/.test(id)) return;
+    // Returning from a Stripe 3-D Secure redirect: finalize the charge, then let
+    // resumeJob route to the right step (EO pending / download / etc.).
+    const rs = params.get('redirect_status');
+    if (rs) {
+        const done = () => resumeJob(id);
+        if (rs === 'succeeded') {
+            gmFetch(`/api/scrub-jobs/${id}/payment-confirm`, { method: 'POST' }).catch(() => {}).finally(done);
+        } else {
+            done();
+        }
+        return;
+    }
+    resumeJob(id);
 });
 </script>
 {% endblock %}
