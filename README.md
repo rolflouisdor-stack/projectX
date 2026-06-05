@@ -1,15 +1,16 @@
 # Gravitas Leads — Mailer Portal
 
-External partner portal where mailers sign up, scrub their email lists against Gravitas data, or buy fresh records. Flask + SQLAlchemy + MySQL, server-rendered HTML with a JSON API on the same app.
+External partner portal where mailers sign up, clean their email lists via EmailOversight, or buy fresh records. Flask + SQLAlchemy + MySQL, server-rendered HTML with a JSON API on the same app. Payments via **Stripe** (live); email cleaning via **EmailOversight** (live); notifications via Mandrill.
 
 🟢 **Live in production:** <https://mailer.gravitasleads.io>
 
+- **Full API reference:** [`docs/api-documentation.md`](docs/api-documentation.md)
 - **Current state / next steps (rolling):** [`continueContext.md`](continueContext.md)
 - **Project ledger (deeper background):** [`CONTEXT.md`](CONTEXT.md)
 - **Deploy to DigitalOcean (+ real-world learnings):** [`DEPLOYMENT.md`](DEPLOYMENT.md)
 - **Admin / cross-system API reference:** [`ADMIN_API.md`](ADMIN_API.md)
-- **Original spec:** [`Partner_portals_Spec.md`](Partner_portals_Spec.md)
-- **EmailOversight FTP integration (design):** [`FTP.md`](FTP.md)
+- **Product spec:** [`Partner_portals_Spec.md`](Partner_portals_Spec.md)
+- **EmailOversight FTP integration:** [`FTP.md`](FTP.md)
 
 ## Local quickstart
 

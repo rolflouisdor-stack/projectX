@@ -5,13 +5,17 @@ and how we automate the round trip. **Every** scrub job goes through this
 path — the real-time `/api/emailvalidation` REST endpoint was evaluated and
 dropped (see "Why FTP-only" below).
 
-> **Status (2026-06-03): EO ANSWERED — unblocked, building.** All 5 questions
-> resolved (see §10) and the `ValidationStatusId` code table is in §12. Product
-> decision: the scrub pipeline is being refactored to upload → confirm-email-col
-> → quote (per-record × margin) → **pay (stub for now)** → submit to EO → poll →
-> retrieve cleaned file → presigned download. The mock-scrub engine
-> (`scrub_engine.run_mock_scrub_on_records`) + per-unique pricing + DB-record
-> import are being removed.
+> **Status (2026-06-05): LIVE in production — proven at scale.** The scrub
+> pipeline is now: upload → confirm-email-col → quote (per-record × tiered margin)
+> → **pay (real Stripe)** → submit to EO via FTP → poll → retrieve cleaned file →
+> presigned download (delivered as-is). `EO_FTP_ENABLED=true`. A 184k-record QA job
+> round-tripped end-to-end 2026-06-04 (both notification emails delivered).
+> **Pricing:** EO cost **$0.000375/record**; customer margin tiered by list size —
+> **<100k = +40%, 100k–149,999 = +35%, ≥150k = +30%** (config
+> `EO_MARGIN_PCT_SMALL/MID/LARGE`), $0.50 minimum. Stripe's processing fee is
+> additionally passed to the customer at checkout (gross-up). The legacy mock-scrub
+> engine still exists behind `EO_FTP_ENABLED=false` but is superseded; slated for
+> retirement.
 >
 > **EO answers, summarized:**
 > 1. **SFTP** = same host, but EO must whitelist OUR egress IP(s) to enable it.

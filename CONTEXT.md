@@ -9,9 +9,9 @@
 
 ---
 
-## 🔖 RESUME HERE — updated 2026-06-01, Phase 5 closed
+## 🔖 RESUME HERE — updated 2026-06-05
 
-**The big picture:** **The app is LIVE in production at https://mailer.gravitasleads.io.** Phases 0–5 done; one application bug open; Phase 6 (Stripe) is the next major workstream. **For all current operational detail, open `continueContext.md`** — that file is the rolling resume doc and is kept up-to-date. This block is a one-glance summary.
+**The big picture:** **The app is LIVE in production at https://mailer.gravitasleads.io.** Phases 0–6 done. **EmailOversight clean flow is LIVE + proven at scale** (184k QA job round-tripped; prod Mandrill email). **Stripe is LIVE in production** — Payment Element + saved cards, live keys + live webhook, $0.50 min charge, and the Stripe fee is passed to the customer (gross-up). **For all current operational detail, open `continueContext.md` / `RESUME_2026-06-05.md`** — those are the rolling resume docs. This block is a one-glance summary.
 
 | Phase | What | Status |
 |---|---|---|
@@ -21,11 +21,11 @@
 | 3 | Routing — subdomains | ✅ decided |
 | 4 | Spin up App on DO (web + worker + MySQL + Valkey + Spaces) | ✅ |
 | 5 | Custom domain `mailer.gravitasleads.io` + cert + CORS + `PUBLIC_BASE_URL` | ✅ |
-| 6 | Real Stripe (test mode first), two-layer idempotency, webhook | ⏳ next |
+| 6 | Real Stripe — Payment Element + saved cards + webhook + fee pass-through | ✅ LIVE |
 | 7 | GitHub Actions CI exists; needs branch-protection click | partial |
 | 8 | sources + Dashboard federation | deferred |
 
-**Open bug:** scrub completion fails at pay (`generate_scrub_artifact` raises "no field mappings"). Diagnosis + fix steps in `continueContext.md §2`.
+**EmailOversight (DONE):** the scrub flow now = upload → confirm email column → quote (per-record × tiered margin) → pay (real Stripe) → submit to EO via FTP → poll → download EO's cleaned file as-is. Live + proven on a 184k QA job. Replaced the old random-pass-rate validation stub. Pricing: $0.000375/record + 40/35/30% margin by size; details in `FTP.md` + memory `project-emailoversight-integration`.
 
 **Live infra at a glance:** App ID `3fb2e338-db24-45ad-8965-e01a1e17a908`; MySQL 8.4 + Valkey 8.0 (both nyc1); Spaces `gravitas-mailer-prod` (nyc3); Spaces key `mailer-prod-2`; GitHub `rolflouisdor-stack/projectX` (autodeploys on push).
 
@@ -62,10 +62,10 @@ They talk through one HTTP boundary: CX3 calls the mailer's `/api/internal/*` en
 - Activity logging on every meaningful action → powers both per-company `/api/internal/activity` (used by CX3 admin views) and the platform-wide `/api/internal/admin/reports/*`.
 - Cross-system internal API for CX3 → activity, raw activity, company list, health probe.
 
-### Stubbed (not real yet — see `Partner_portals_Spec.md` §6)
-- Stripe payments — `app/services/stripe_stub.py` returns fake `pi_stub_...` ids; cards are validated (Luhn + brand from BIN) but no charge.
-- Email validation — random 91-95% pass rate, but now applied per-row inside the import worker on real `scrub_job_records`.
-- Scrub overlap matching — random unique/overlap split, but operates on real imported rows. **Unresolved design Q:** does mailer pay for *unique* or *non-overlapping* records?
+### Real now (formerly stubbed)
+- **Stripe payments — LIVE.** `app/services/stripe_service.py` (real Stripe when `STRIPE_ENABLED=true`, stub fallback otherwise). PaymentIntent + Payment Element, SetupIntent saved cards, signed webhook, fee pass-through. See memory `project-stripe-integration`.
+- **Email validation — REAL via EmailOversight** (FTP round-trip; the cleaned file IS the deliverable). Replaced the random-pass-rate stub.
+- *Legacy mock-scrub* (random unique/overlap split) still exists behind `EO_FTP_ENABLED=false` but is superseded by the EO flow in prod; slated for retirement.
 
 ### Done in V1.3 (2026-05-22)
 - **Scrub upload pipeline is real, end-to-end.** Browser → presigned multipart PUT → DigitalOcean Spaces. New 6-step wizard (Upload → **Map columns** → Processing → Review → Payment → Download). Background RQ worker parses the file from Spaces, applies the user's column mapping, writes rows into `scrub_job_records` (+ EAV custom fields in `scrub_job_record_fields`), and runs the scrub engine. Result `.xlsx` is generated from real records and stored back in Spaces; downloads are 302 → presigned GET.
@@ -185,13 +185,12 @@ mailer/
     │   │                                 sample banner+promo)
     │   ├── migrations.py                 NEW V1.3 — boot-time idempotent ALTERs
     │   ├── activity_logger.py            log_activity() helper
-    │   ├── pricing.py                    calc_purchase_quote()
-    │   ├── scrub_engine.py               STUB validator + overlap; now operates on real rows
-    │   ├── header_detector.py            NEW V1.3 — sniff format + suggest standard mapping
-    │   ├── storage.py                    NEW V1.3 — boto3/Spaces wrapper (presigned URLs,
-    │   │                                 multipart upload, etc.)
-    │   ├── stripe_stub.py                STUB — payment intent + attach/detach card +
-    │   │                                 Luhn + BIN→brand
+    │   ├── pricing.py                    calc_purchase_quote() + calc_eo_clean_price() (tiered) + add_processing_fee()
+    │   ├── scrub_engine.py               legacy mock validator/overlap (EO flow supersedes)
+    │   ├── header_detector.py            sniff format + suggest mapping + count_data_rows()
+    │   ├── storage.py                    boto3/Spaces wrapper (presign, multipart, delete_prefix)
+    │   ├── eo_ftp.py                     EmailOversight FTP client (submit / find / retrieve)
+    │   ├── stripe_service.py             REAL Stripe (PaymentIntent/SetupIntent/webhook) + stub fallback
     │   └── xlsx_generator.py             Reads real records, writes to Spaces
     ├── jobs/                             NEW V1.3 — RQ background worker
     │   ├── queue.py                      Redis connection + enqueue_import()
@@ -221,7 +220,9 @@ mailer/
 | `DATABASE_URL` | Yes | (in `.env`) | MySQL DSN. Auto-injected when DO managed DB is attached. |
 | `INTERNAL_API_KEY` | **Secret** | (in `.env`) | Header `X-Internal-Api-Key` for `/api/internal/*` (CX3 + admin) |
 | `JWT_COOKIE_SECURE` | Yes in prod | `false` | Must be `true` on HTTPS (`ProductionConfig` defaults `true`) |
-| `STRIPE_ENABLED` | No | `false` | Flip when real Stripe wired |
+| `STRIPE_ENABLED` | No | `false` | **`true` in prod** — live keys (`STRIPE_SECRET_KEY`/`STRIPE_PUBLISHABLE_KEY`/`STRIPE_WEBHOOK_SECRET`) + fee pass-through (`STRIPE_PASS_FEE`) |
+| `EO_FTP_ENABLED` | No | `false` | **`true` in prod** — EmailOversight clean flow + creds (`EO_FTP_PASSWORD`, `EO_PRICE_PER_RECORD`) |
+| `ADMIN_EMAILS` | No | `rolf.louisdor@cx3ads.com` | Cross-company admin access to internal/admin API via session |
 | `ARTIFACT_DIR` | No | `/tmp/gravitas_mailer_artifacts` | **Legacy** — unused since V1.3 moved storage to Spaces |
 | **`S3_*`** | **Yes** | (in `.env`) | DO Spaces creds — uploads + result xlsx live here. See `.env.example` for the 5 vars. |
 | **`REDIS_URL`** | **Yes** | `redis://localhost:6379/0` | RQ queue; required for the file-import worker to drain mappings → records. |

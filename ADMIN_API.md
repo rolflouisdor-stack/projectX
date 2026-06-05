@@ -2,10 +2,11 @@
 
 **Base URL (dev):** `http://127.0.0.1:5070`
 **Namespace:** `/api/internal/admin/`
-**Auth:** every endpoint requires the header `X-Internal-Api-Key: <key>` (or `?api_key=<key>`).
-The key is in `mailer/.env` as `INTERNAL_API_KEY`. **Never expose this on a public hostname** — gate it by host, IP allowlist, or VPN in prod.
+**Auth (either):** the header `X-Internal-Api-Key: <key>` (or `?api_key=<key>`) for server-to-server callers (CX3 Dashboard), **OR** a logged-in **platform-admin session** — accounts whose email is in `ADMIN_EMAILS` (default `rolf.louisdor@cx3ads.com`) reach every `/api/internal/*` + `/api/internal/admin/*` endpoint straight from the browser, no key. Non-admins get `401 admin access required`. **Never expose the key on a public hostname.**
 
-Companion to the read-only cross-system endpoints already documented in §5 of `Partner_portals_Spec.md` (which live at `/api/internal/*` without the `/admin/` infix). This file covers the *write* side: changing prices, pushing banner updates, and pulling cross-company reports.
+Companion to the read-only cross-system endpoints documented in §5 of `Partner_portals_Spec.md` (`/api/internal/*`). This file covers the *write* side + reports. Full machine reference: `docs/api-documentation.md`.
+
+**One-call overview:** `GET /api/internal/admin/overview?days=30` returns a cross-company snapshot — companies/users, job counts, revenue, recent jobs + activity — the "everything happening in the app" view.
 
 > CX3 Ops is the intended caller. There is no admin UI yet — calls happen via curl, scripts, or whatever the CX3 dashboard adds on top of these endpoints.
 

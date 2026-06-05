@@ -22,6 +22,7 @@ Generated 2026-06-04. Source of truth is the code in `app/` — regenerate if ro
    - [Purchase jobs](#purchase-jobs)
    - [Downloads](#downloads)
    - [Job history](#job-history)
+   - [Payments (Stripe)](#payments-stripe)
 7. [Account API](#account-api) — `/api/account/*`
 8. [Internal API](#internal-api) — `/api/internal/*` (API-key or admin session)
 9. [Admin API](#admin-api) — `/api/internal/admin/*` (API-key or admin session)
@@ -59,7 +60,7 @@ Platform admins get full cross-company read access to the **entire internal + ad
 
 On a protected `/api/*` call without a valid session the API returns `401 {"error":"not authenticated"}`; protected **pages** redirect to `/login`.
 
-Payments are currently a **Stripe stub** (`create_payment_intent` always "succeeds"); `STRIPE_ENABLED=false`.
+**Payments are live on real Stripe** (`STRIPE_ENABLED=true`, live keys). Job charges use a **PaymentIntent confirmed on-page via the Stripe Payment Element**; the job is fulfilled on the `payment_intent.succeeded` webhook (with a client-side `/payment-confirm` verify as the immediate path). Saved cards use a **SetupIntent**. Stripe's processing fee (2.9% + $0.30) is **passed to the customer** — the charge is grossed up so the payout nets the quoted price, shown as a "Card processing fee" line at checkout. Minimum charge is **$0.50** (`MIN_CHARGE_CENTS`). If `STRIPE_ENABLED=false`, a deterministic stub instantly "succeeds" instead (dev/QA).
 
 ---
 
@@ -129,10 +130,16 @@ curl -s -b cookies.txt -X POST "$BASE/api/scrub-jobs/$JOB/confirm-email" \
 curl -s -b cookies.txt "$BASE/api/scrub-jobs/$JOB"
 # repeat until "status":"priced" — response has uploaded_count, rate_per_record, price_cents
 
-# 2g. Pay (stub) -> the worker sends the file to EmailOversight via FTP
+# 2g. Pay. With Stripe LIVE this returns a client_secret instead of advancing:
 curl -s -b cookies.txt -X POST "$BASE/api/scrub-jobs/$JOB/pay"
-# -> job, "status":"submitting_ftp"  (then -> "awaiting_ftp_result")
-# A "payment received" email goes to the job owner here.
+# -> { requires_payment:true, client_secret, publishable_key, base_cents, fee_cents, amount_cents }
+#    (amount_cents = price grossed up for the 2.9%+30c processing fee)
+# The browser confirms the card with that client_secret via the Stripe Payment
+# Element (stripe.confirmPayment), then calls:
+curl -s -b cookies.txt -X POST "$BASE/api/scrub-jobs/$JOB/payment-confirm"
+# -> server verifies the PaymentIntent succeeded, advances to "submitting_ftp"
+#    (the payment_intent.succeeded webhook is the backstop). "payment received" email fires.
+# (When STRIPE_ENABLED=false, step 2g's /pay advances immediately — no confirm step.)
 
 # 2h. Poll until EO returns the cleaned file. EO is a FIFO queue — this can take
 #     minutes to hours depending on size + queue depth.
@@ -272,10 +279,13 @@ Permanently delete a job: its Spaces objects (`uploads/<co>/<job>/` + `results/<
 - **Response:** `{ deleted: true, id, spaces_objects_deleted }`. `404` if not found/owned.
 
 #### POST `/api/scrub-jobs/<job_id>/pay`
-Stub payment + advance. From `priced`/`awaiting_payment`.
-- **EO flow:** → `submitting_ftp`, enqueues FTP submit → poll → complete; sends "payment received" email.
-- **Legacy flow:** guards kept columns + unique_count > 0 → `generating`, enqueues artifact build.
+Start payment. From `priced`/`awaiting_payment`. Guards (nothing to clean/sell) run pre-charge.
+- **Stripe ON:** creates a PaymentIntent (amount grossed up for the fee) → `awaiting_payment`. **Response:** `{ requires_payment: true, client_secret, publishable_key, base_cents, fee_cents, amount_cents, job }`. The job advances on the webhook / `payment-confirm`, **not** here.
+- **Stripe OFF (stub):** advances immediately — EO flow → `submitting_ftp` (+ FTP submit + "payment received" email); legacy → `generating` (artifact build).
 - **Errors:** `400`, `404`, `409`, `503`.
+
+#### POST `/api/scrub-jobs/<job_id>/payment-confirm`
+Called by the client right after Stripe confirms the card; re-verifies the PaymentIntent status server-side and advances the job (idempotent — the webhook is the backstop). **Errors:** `402` payment not completed, `404`, `409` no payment in progress.
 
 ### Purchase jobs
 
@@ -290,7 +300,12 @@ Stub payment + advance. From `priced`/`awaiting_payment`.
 Fetch one (company-scoped). `404` if not found/owned.
 
 #### POST `/api/purchase-jobs/<job_id>/pay`
-Stub payment → generates result synchronously → `complete`. `409` if wrong status.
+- **Stripe ON:** creates a PaymentIntent (grossed up for the fee) → `awaiting_payment`; returns `{ requires_payment, client_secret, publishable_key, base_cents, fee_cents, amount_cents, job }`. Completed on webhook / `payment-confirm`.
+- **Stripe OFF (stub):** generates the result synchronously → `complete`.
+- `409` if wrong status.
+
+#### POST `/api/purchase-jobs/<job_id>/payment-confirm`
+Verify the PaymentIntent server-side after the client confirms, then generate + complete the purchase (idempotent; webhook backstop). **Errors:** `402`, `404`, `409`.
 
 ### Downloads
 
@@ -308,6 +323,14 @@ Company-scoped; `404` if no result file.
 #### GET `/api/jobs`
 The caller's jobs (most recent 50 each). **Response:** `{ scrub_jobs, purchase_jobs }`.
 
+### Payments (Stripe)
+
+#### GET `/api/stripe/config`
+What the front-end needs to render the card UI. **Response:** `{ enabled, publishable_key, pass_fee, fee_percent, fee_fixed_cents }`.
+
+#### POST `/api/stripe/webhook`
+Stripe's authoritative payment signal — **no session**, verified by `Stripe-Signature` against `STRIPE_WEBHOOK_SECRET`. Handles `payment_intent.succeeded` (advance scrub / complete purchase) and `setup_intent.succeeded` (store saved card), idempotently. `400` on bad signature.
+
 ---
 
 ## Account API
@@ -319,8 +342,10 @@ Blueprint `account`, prefix **`/api/account`**. All require a session; updates o
 | GET | `/api/account` | `{ user, company, payment_method }`. |
 | PUT | `/api/account/profile` | `{ full_name, email, phone? }`. `409` email taken. |
 | PUT | `/api/account/company` | `{ company_name }`. **Owner only** (`403` otherwise); `409` name taken. |
-| PUT | `/api/account/payment-method` | `{ card_number, exp_month, exp_year, cvc, cardholder_name }` (stub Stripe). |
-| DELETE | `/api/account/payment-method` | `{ ok: true }` (or `{ ok, noop }` if none). |
+| POST | `/api/account/payment-method/setup-intent` | Begin saving a card: ensures a Stripe Customer, creates a SetupIntent. **Response:** `{ client_secret, publishable_key }`. `409` if Stripe off. |
+| POST | `/api/account/payment-method/confirm` | After the client confirms the SetupIntent: `{ payment_method_id }` → stores brand/last4/exp + pm id. `409` if Stripe off. |
+| PUT | `/api/account/payment-method` | **Stub only** (Stripe off): `{ card_number, exp_month, exp_year, cvc, cardholder_name }`. Returns `409` when Stripe is on (use the SetupIntent flow). |
+| DELETE | `/api/account/payment-method` | Remove the saved card (detaches at Stripe). `{ ok: true }` (or `{ ok, noop }`). |
 
 ---
 

@@ -160,13 +160,24 @@ Plain env vars (not secret):
 
 ```
 FLASK_ENV          = production
-PUBLIC_BASE_URL    = ${APP_URL}                  # auto-expanded to the DO URL
+PUBLIC_BASE_URL    = https://mailer.gravitasleads.io   # also set on the WORKER (email links)
 JWT_COOKIE_SECURE  = true                        # required on HTTPS
 CORS_ORIGINS       =                              # fill in once CX3 has a URL
-STRIPE_ENABLED     = false
-EMAIL_VALIDATOR_ENABLED = false
+STRIPE_ENABLED     = true                         # LIVE (live keys below)
+STRIPE_PASS_FEE    = true                         # gross up charge so payout nets the price
+STRIPE_FEE_PERCENT = 2.9
+STRIPE_FEE_FIXED_CENTS = 30
+MIN_CHARGE_CENTS   = 50                           # Stripe rejects < $0.50
+EMAIL_ENABLED      = true                         # Mandrill (prod key)
+EMAIL_VALIDATOR_ENABLED = false                  # legacy; EO is the real validator
+EO_FTP_ENABLED     = true                         # EmailOversight clean flow LIVE
+EO_PRICE_PER_RECORD = 0.000375                    # EO cost/record (margin tiered in code)
+ADMIN_EMAILS       = rolf.louisdor@cx3ads.com     # cross-company admin via session
 ARTIFACT_DIR       = /tmp/gravitas_mailer_artifacts
 ```
+> These live on **both** the `web` and `worker` components. Edit prod env via the
+> live-spec round-trip (`doctl apps spec get … > f; edit; doctl apps update --spec f`) —
+> **never** `doctl apps update --spec .do/app.yaml` (it lacks the secrets and wipes them).
 
 `${APP_URL}` is a DO-provided expansion to the public URL of the app. After your first deploy DO assigns something like `https://gravitas-mailer-xyz12.ondigitalocean.app`. With this expansion, `PUBLIC_BASE_URL` follows automatically — no need to copy/paste the URL back in.
 
@@ -300,13 +311,18 @@ Deploy update: `ssh` in, `git pull`, `pip install -r requirements.txt` (if deps 
 | `CORS_ORIGINS` | Optional | Comma-separated origins that may call `/api/*` from a browser. Leave empty if mailer is only consumed by its own UI. |
 | `DATABASE_URL` | **Yes** | `mysql+pymysql://user:pass@host/db`. Auto-injected when you attach a managed MySQL. |
 | `INTERNAL_API_KEY` | **Yes, SECRET** | Header `X-Internal-Api-Key` for `/api/internal/*` (CX3 + admin endpoints). |
+| `ADMIN_EMAILS` | Optional | Comma-separated; these accounts get cross-company internal/admin access via a normal session. Default `rolf.louisdor@cx3ads.com`. |
 | `JWT_TOKEN_EXPIRY_SECONDS` | Optional | Default 86400 (24h). |
 | `JWT_COOKIE_SECURE` | **Yes — set `true` in prod** | Adds `Secure` flag so the session cookie never leaves over plain HTTP. |
-| `STRIPE_ENABLED` | No | Flip to `true` only once real Stripe wiring replaces the stub. |
-| `STRIPE_SECRET_KEY` | If `STRIPE_ENABLED=true` | `sk_live_...`. SECRET. |
-| `STRIPE_WEBHOOK_SECRET` | If using webhooks | `whsec_...`. SECRET. |
-| `EMAIL_VALIDATOR_ENABLED` | No | Same story for NeverBounce/ZeroBounce. |
-| `EMAIL_VALIDATOR_API_KEY` | If enabled | SECRET. |
+| `STRIPE_ENABLED` | **`true` in prod** | Real Stripe (Payment Element + saved cards + webhook). `false` = deterministic stub. |
+| `STRIPE_SECRET_KEY` | **Yes, SECRET** | `sk_live_...`. |
+| `STRIPE_PUBLISHABLE_KEY` | **Yes** | `pk_live_...` (safe to expose; served to the browser). |
+| `STRIPE_WEBHOOK_SECRET` | **Yes, SECRET** | `whsec_...` from the live webhook (`/api/stripe/webhook`). |
+| `STRIPE_PASS_FEE` / `STRIPE_FEE_PERCENT` / `STRIPE_FEE_FIXED_CENTS` | Optional | Pass Stripe's fee to the customer (gross-up). Defaults: on, 2.9, 30. |
+| `MIN_CHARGE_CENTS` | Optional | Minimum order total (Stripe floor). Default 50. |
+| `EMAIL_ENABLED` / `SMTP_*` / `EMAIL_FROM` | **Yes for email** | Mandrill SMTP (prod key). `EMAIL_FROM=Gravitas Leads <noreply@gravitasleads.io>`. |
+| `EO_FTP_ENABLED` | **`true` in prod** | EmailOversight clean flow. Needs `EO_FTP_PASSWORD` (SECRET), `EO_PRICE_PER_RECORD` (0.000375); host/user default correctly. Margin tiers via `EO_MARGIN_PCT_SMALL/MID/LARGE`. |
+| `EMAIL_VALIDATOR_ENABLED` | No | Legacy stub flag; EmailOversight is the real validator. |
 | `ARTIFACT_DIR` | Optional | Legacy local-FS path. Unused once Spaces is wired (below). |
 | `ARTIFACT_TTL_DAYS` | Optional | Default 30. |
 | `S3_ENDPOINT_URL` | **Yes** | e.g. `https://nyc3.digitaloceanspaces.com`. |

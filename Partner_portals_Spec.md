@@ -1,8 +1,8 @@
 # Gravitas Leads — Mailer Portal
 
-**Version:** 1.3 (Spaces-backed uploads + column mapping)
-**Date:** 2026-05-22
-**Status:** Backend functional end-to-end. Third-party integrations (Stripe, email validator, real scrubbing) are stubs that successfully exercise the full data flow.
+**Version:** 1.4 (live in production — real Stripe + EmailOversight)
+**Date:** 2026-06-05 (V1.3 base 2026-05-22)
+**Status:** **LIVE in production at https://mailer.gravitasleads.io.** Real integrations: **Stripe** payments (Payment Element + saved cards + webhook + fee pass-through) and **EmailOversight** email cleaning (FTP round-trip; the cleaned file is the deliverable). The old Stripe/validator/scrub stubs are superseded (stub remains only as the `STRIPE_ENABLED=false` / `EO_FTP_ENABLED=false` dev fallback). Canonical endpoint reference: `docs/api-documentation.md`.
 **Lives at:** `/Users/rolf.louisdor/Desktop/mailer/` (relocated from `~/Desktop/Dashboard/gravitas-mailer/` on 2026-05-21).
 
 ---
@@ -52,9 +52,12 @@ Then browse to `/signup` to create the first account.
 | `INTERNAL_API_KEY` | Cross-system API key for CX3 Dashboard | random 64-hex |
 | `DATABASE_URL` | MySQL DSN | `mysql+pymysql://root:Newpassword12%40@localhost/gravitas_mailer` |
 | `PORT` | HTTP port | `5070` (do **not** use 5060 — see §11) |
-| `STRIPE_ENABLED` | Toggle real Stripe vs stub | `false` |
-| `EMAIL_VALIDATOR_ENABLED` | Toggle real NeverBounce/ZeroBounce vs stub | `false` |
+| `STRIPE_ENABLED` | Real Stripe vs stub | `false` dev / **`true` prod** |
+| `EO_FTP_ENABLED` | EmailOversight clean flow vs legacy mock-scrub | `false` dev / **`true` prod** |
+| `ADMIN_EMAILS` | Cross-company admin via session | `rolf.louisdor@cx3ads.com` |
 | `ARTIFACT_DIR` | Where generated `.xlsx` files live | `/tmp/gravitas_mailer_artifacts` |
+
+(Full prod env matrix — Stripe live keys, fee pass-through, EO creds, Mandrill SMTP — in `DEPLOYMENT.md` §7.)
 
 ---
 
@@ -89,13 +92,17 @@ Then browse to `/signup` to create the first account.
 | POST | `/api/scrub-jobs/{id}/detect-headers` | Server reads only the first ~5 rows from Spaces, returns `{headers, sample_rows, suggested_mapping, standard_fields}`. |
 | POST | `/api/scrub-jobs/{id}/mapping` | Persist the user's column mapping + enqueue the import worker. Body: `{mappings:[{source_header, column_index, target_field, is_standard, skip}]}` |
 | GET | `/api/scrub-jobs/{id}` | Job status (front-end polls during importing/scrubbing) |
-| POST | `/api/scrub-jobs/{id}/pay` | Charge card (stub for now), generate `.xlsx` to Spaces, flip to `complete` |
+| POST | `/api/scrub-jobs/{id}/confirm-email` | EO flow: confirm the email column → quote (records × tiered margin) → `priced` |
+| POST | `/api/scrub-jobs/{id}/pay` | Create Stripe PaymentIntent (grossed up for fee) → `client_secret`; job advances on the webhook / `payment-confirm` (EO: submit→poll→complete; legacy: build `.xlsx`) |
+| POST | `/api/scrub-jobs/{id}/payment-confirm` | Verify the PaymentIntent + advance (idempotent; webhook backstop) |
+| DELETE | `/api/scrub-jobs/{id}` | Delete job: DB row + Spaces files (company-scoped) |
 | GET | `/api/scrub-jobs/{id}/download` | 302 → presigned Spaces GET URL |
 | GET | `/api/scrub-jobs/{id}/download-url` | Same URL as JSON `{url, filename, expires_in}` (used by the wizard) |
 | POST | `/api/purchase-jobs/quote` | Compute live quote (used by the volume slider + promo input) |
 | POST | `/api/purchase-jobs` | Persist a quote as a real job awaiting payment |
 | GET | `/api/purchase-jobs/{id}` | Job status |
-| POST | `/api/purchase-jobs/{id}/pay` | Charge card (stub), generate `.xlsx`, complete |
+| POST | `/api/purchase-jobs/{id}/pay` | Create Stripe PaymentIntent → `client_secret`; completed on webhook / `payment-confirm` (stub: generate + complete now) |
+| POST | `/api/purchase-jobs/{id}/payment-confirm` | Verify PaymentIntent → generate `.xlsx` → complete |
 | GET | `/api/purchase-jobs/{id}/download` | Stream the generated `.xlsx` |
 | GET | `/api/jobs` | Both job lists for the history page |
 
@@ -247,38 +254,19 @@ A small admin page in `cx3-dashboard` is the next step — the API is ready.
 
 ---
 
-## 6. What's stubbed, and what real implementations need
+## 6. Integrations — status
 
-### 6.1 Stripe (currently a stub)
+### 6.1 Stripe — ✅ DONE (LIVE, 2026-06-05)
 
-`app/services/stripe_stub.py` returns a fake `payment_intent_id` and immediately marks jobs paid. To go live:
+`app/services/stripe_service.py` (real Stripe when `STRIPE_ENABLED=true`, stub fallback otherwise). `stripe==11.6.0`. Job charges create a `PaymentIntent`; the front-end confirms via the **Stripe Payment Element**; the job is fulfilled on the `payment_intent.succeeded` **webhook** (`POST /api/stripe/webhook`, signature-verified) with a client `/payment-confirm` as the immediate path. **Saved cards** use a SetupIntent (`mailer_companies.stripe_customer_id`). Stripe's fee (2.9% + $0.30) is **passed to the customer** via a gross-up (`pricing.add_processing_fee`) so the payout nets the quoted price; $0.50 minimum. Live keys + live webhook (`we_1Tez9P…`) configured.
 
-1. `pip install stripe` into `lib/`
-2. Replace `stripe_stub.create_payment_intent` with real `stripe.PaymentIntent.create(amount=…, currency='usd', metadata={'job_kind':..., 'job_id':...})`
-3. Return `client_secret` so the front-end can mount Stripe Elements and call `stripe.confirmCardPayment`
-4. Add a `/webhooks/stripe` endpoint that verifies the signature with `STRIPE_WEBHOOK_SECRET` and flips `paid_at` / `status` based on `payment_intent.succeeded`
-5. Flip `STRIPE_ENABLED=true` in `.env`
+### 6.2 Email validation — ✅ DONE via EmailOversight
 
-### 6.2 Email validation (stub)
+Replaced the random-pass-rate stub. The scrub flow uploads the list to **EmailOversight** over FTP, polls for the processed file, and returns it as-is with EO's validation columns. Design + status: `FTP.md`; memory `project-emailoversight-integration`. Pricing: $0.000375/record + tiered margin (40/35/30% by size).
 
-`app/services/scrub_engine.py` currently uses a random 91-95% pass rate to simulate cleaning. Real impl:
+### 6.3 Real scrubbing engine — superseded by EmailOversight
 
-1. Pick a provider (NeverBounce, ZeroBounce, Kickbox)
-2. Add a `app/services/email_validator.py` that batches up to 5000 emails per call, polls for completion, and returns `{valid, invalid, disposable, role}` buckets
-3. Replace the random `validated_count` math in `scrub_engine.run_mock_scrub` with the real result
-4. Set `EMAIL_VALIDATOR_ENABLED=true`
-
-Cost: ~$0.004–0.008 per validation. The +20% cleaning premium covers this.
-
-### 6.3 Real scrubbing engine
-
-The current stub derives `unique_count` / `overlap_count` randomly. The real implementation needs to:
-
-1. Parse the uploaded CSV/XLSX with `openpyxl`/`csv` and normalize each email (`lower().strip()`)
-2. Pull the candidate-email-hash pool from CX3's data sources scoped to the publisher's verticals (this requires a connection to `cx3_dashboard`'s `conversions` table, OR a periodic sync into `gravitas_mailer`'s own table)
-3. For each uploaded email, sha256-hash it and check membership against that pool
-4. Bucket as `unique` (not in our data) or `overlap` (already in our data)
-5. **Open question (still unresolved from Partner_Portals_Spec V1.x):** does the mailer pay for the *unique* records (i.e. emails we have that they don't), or the *non-overlapping* records (emails they have that we don't)? Resolve before this ships.
+The old mock unique/overlap split (`scrub_engine.run_mock_scrub`) still exists behind `EO_FTP_ENABLED=false` but is **superseded** in prod by the EO clean flow (deliverable = EO's cleaned file). Slated for retirement. The historical "pay for unique vs non-overlapping" question is moot under the EO model (we charge per record cleaned).
 
 ### 6.4 S3 / signed URLs — **DONE (V1.3, 2026-05-22)**
 
@@ -341,9 +329,11 @@ mailer/
 │   ├── services/
 │   │   ├── seeds.py                     idempotent boot-time data
 │   │   ├── activity_logger.py           safe append-only log_activity()
-│   │   ├── pricing.py                   quote math (tier + promo discounts)
-│   │   ├── scrub_engine.py              STUB scrub pipeline
-│   │   ├── stripe_stub.py               STUB Stripe payment
+│   │   ├── pricing.py                   quote math (tiers, promos, EO clean price, fee gross-up)
+│   │   ├── scrub_engine.py              legacy mock scrub (superseded by EO)
+│   │   ├── eo_ftp.py                    EmailOversight FTP client
+│   │   ├── stripe_service.py            REAL Stripe (PaymentIntent/SetupIntent/webhook) + stub fallback
+│   │   ├── email_service.py             Mandrill SMTP notifications
 │   │   └── xlsx_generator.py            real openpyxl output of generated rows
 │   ├── static/
 │   │   ├── css/mailer.css               orange/white theme
@@ -453,6 +443,10 @@ All of the above returned 200 in the smoke-test run that ships with V1.0.
 
 ## 10. Change log
 
+- **2026-06-05** — V1.4 **Live in production.**
+  - **EmailOversight clean flow** live (upload → confirm email col → quote → pay → FTP → poll → download as-is); replaced the mock scrub/validator. 184k QA job round-tripped. Pricing $0.000375/rec + tiered margin (40/35/30%), $0.50 min.
+  - **Real Stripe** live: Payment Element (scrub + buy), SetupIntent saved cards, signed webhook, 3-D Secure redirect handling, and **processing-fee pass-through** (gross-up so payout nets the price).
+  - Email on a **production Mandrill** key (real delivery). Delete-job endpoint + Spaces cleanup. Admin access (`ADMIN_EMAILS`) + `/api/internal/admin/overview`. In-repo API reference at `docs/api-documentation.md`.
 - **2026-05-20** — V1.0 Initial detached project. Full mailer-facing UI + API + activity logging + cross-system activity API. Stripe / email validator / real scrubbing engine all stubbed (see §6 for the spec on swapping each).
 - **2026-05-21** — V1.1
   - **Relocated** the entire codebase from `~/Desktop/Dashboard/gravitas-mailer/` to `~/Desktop/mailer/` (the source folder no longer exists).

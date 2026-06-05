@@ -1,5 +1,20 @@
 # Continue Context — rolling resume doc
 
+> **▶ RESUME 2026-06-05 — START HERE: [`RESUME_2026-06-05.md`](RESUME_2026-06-05.md)**.
+> Prod live/healthy on `f4d7b13`. **EmailOversight clean flow is LIVE + proven at scale** (184k QA job
+> round-tripped; emails on a PROD Mandrill key). EO pricing tiered ($0.000375/rec; 40/35/30% by size).
+> **Stripe is LIVE in production** — Payment Element (scrub+buy) + SetupIntent saved cards, live keys +
+> live webhook (`we_1Tez9P…`), 3-D Secure redirect handled, **$0.50 min charge**, and the **Stripe fee
+> is passed to the customer** (gross-up so payout nets the quoted price; 2.9%+30¢). Also shipped:
+> delete-job endpoint + Spaces cleanup, admin access (`ADMIN_EMAILS`) + `/api/internal/admin/overview`,
+> in-repo API docs (`docs/api-documentation.md`). LEFT: real-card smoke test + refund; rotate the
+> `sk_live_` key (pasted in chat). Detail in the resume doc + memory `project-stripe-integration`.
+>
+> (Prior: 2026-06-04 — EO backend built inert; see `RESUME_2026-06-04.md`.)
+>
+> (Prior: 2026-06-03 — JSON-blob redesign fixed EAV-heavy imports (~5 min for 878k); DB reset; email
+> notifications wired on a Mandrill test key + DNS done. See `RESUME_2026-06-02.md` for that history.)
+
 > Rolling resume doc, last updated **2026-06-01** (Phase 5 closed). Read this top-to-bottom; it has everything needed to pick up where we stopped. The deeper project ledger is `CONTEXT.md`; this file is the deployment-sprint working state.
 
 ---
@@ -7,6 +22,8 @@
 ## 1. One-paragraph status
 
 The Mailer Portal is **fully deployed and live on its custom domain** at `https://mailer.gravitasleads.io` (and still on the DO default ingress `https://gravitas-mailer-ww4cc.ondigitalocean.app`). Phases 0–5 are complete: code on GitHub, DO App Platform with MySQL 8.4 + Valkey 8.0 + Spaces, secrets wired, custom domain attached with Let's Encrypt cert, upload/multipart pipeline working end-to-end through column mapping. **One application-logic bug is open** — completing a scrub fails at the *payment* step with `RuntimeError: no field mappings`. Phase 6 (real Stripe) is the next major workstream.
+
+**Also in-flight (blocked on external):** **EO FTP integration** — real email validation via EmailOversight's bulk FTP, replacing the random-pass-rate stub. Design phase complete in `FTP.md` (FTP-only, plain-FTP-cleartext-with-asks-for-SFTP, shared `cx3ads` account with the CX3 ops system). Outbound email to EmailOversight sent **2026-06-01** with 5 open questions (SFTP availability, completion signal, full `ValidationStatusId` code table, turnaround SLA, max file size). Awaiting reply 2026-06-01 / 2026-06-02. When it lands, fold answers into `FTP.md §10` and build in order §8a (submit worker) → §8b (poller) → §8c (ingest worker, replaces `scrub_engine.run_mock_scrub_on_records` validation step).
 
 ---
 
@@ -126,6 +143,8 @@ Long-term: ask IT to lift the JumpCloud policy so we can `git clone` to `~/Deskt
 ---
 
 ## 6. Remaining work, priority-ordered
+
+> **🚧 Blocked on external — EO FTP integration.** Design done in `FTP.md`; email to EmailOversight sent 2026-06-01 with 5 questions; reply expected 2026-06-01 / 2026-06-02. Resume from `FTP.md §10` when the answers come back. The `EMAIL_VALIDATOR_*` env scaffold in `.env.example` is dead (the real-time API path was dropped); replace with the `EO_FTP_*` block specified in `FTP.md §4`.
 
 1. **🐞 Fix scrub-artifact "no field mappings" bug** (§2). End-to-end product blocker.
 2. **🧹 Housekeeping commit** of pending files (§5).
