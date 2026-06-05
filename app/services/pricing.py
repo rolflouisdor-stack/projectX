@@ -49,11 +49,16 @@ def calc_eo_clean_price(record_count: int) -> dict:
     eo_cost = Decimal(n) * eo_rate                       # our cost from EO ($)
     user_rate = eo_rate * (Decimal(1) + margin)          # $/record charged to user
     user_total = Decimal(n) * user_rate                  # user pays ($)
+    price_cents = max(0, int(math.ceil(user_total * 100)))
+    # Enforce a minimum order total (Stripe rejects < $0.50). Only when there's
+    # something to clean — a 0-record job stays $0 and is blocked earlier.
+    if n > 0:
+        price_cents = max(price_cents, int(cfg.get('MIN_CHARGE_CENTS') or 50))
     return {
         'rate_per_record': float(user_rate),
         'margin_pct': float(margin_pct),
         'eo_cost_cents': int(math.ceil(eo_cost * 100)),
-        'price_cents': max(0, int(math.ceil(user_total * 100))),
+        'price_cents': price_cents,
     }
 
 

@@ -55,6 +55,9 @@ class Config:
     STRIPE_SECRET_KEY = os.getenv('STRIPE_SECRET_KEY', '')
     STRIPE_PUBLISHABLE_KEY = os.getenv('STRIPE_PUBLISHABLE_KEY', '')   # safe to expose client-side
     STRIPE_WEBHOOK_SECRET = os.getenv('STRIPE_WEBHOOK_SECRET', '')
+    # Stripe rejects charges under $0.50; enforce a minimum order total so the
+    # quoted price and the charge agree (tiny EO cleans would otherwise be < 50¢).
+    MIN_CHARGE_CENTS = int(os.getenv('MIN_CHARGE_CENTS', 50))
 
     EMAIL_VALIDATOR_ENABLED = os.getenv('EMAIL_VALIDATOR_ENABLED', 'false').lower() in ('true', '1', 'yes')
     EMAIL_VALIDATOR_PROVIDER = os.getenv('EMAIL_VALIDATOR_PROVIDER', 'neverbounce')

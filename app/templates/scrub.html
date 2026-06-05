@@ -685,8 +685,10 @@ function renderResults(job) {
     if (EO_ENABLED) {
         document.getElementById('rsUploaded').textContent = fmtNum(job.uploaded_count);
         document.getElementById('rsPrice').textContent = fmtMoney(job.price_cents);
-        document.getElementById('rsPriceDetail').textContent =
-            `${fmtNum(job.uploaded_count)} records × $${job.rate_per_record.toFixed(6)}`;
+        const rawCents = Math.round((job.uploaded_count || 0) * (job.rate_per_record || 0) * 100);
+        let detail = `${fmtNum(job.uploaded_count)} records × $${job.rate_per_record.toFixed(6)}`;
+        if (rawCents < job.price_cents) detail += ` · ${fmtMoney(job.price_cents)} minimum`;
+        document.getElementById('rsPriceDetail').textContent = detail;
         document.getElementById('osUploaded').textContent = fmtNum(job.uploaded_count);
         document.getElementById('osRate').textContent = `$${job.rate_per_record.toFixed(6)} / record`;
         document.getElementById('osTotal').textContent = fmtMoney(job.price_cents);
