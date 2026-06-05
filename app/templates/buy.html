@@ -98,7 +98,7 @@
     <div class="pp-grid-2">
         <div class="pp-card">
             <div class="pp-card-title">Payment</div>
-            <p class="pp-card-sub" style="margin-top:-8px;">Secure card payment via Stripe. (Stub mode — accepting any input for now.)</p>
+            <p class="pp-card-sub" style="margin-top:-8px;">Secure card payment via Stripe.{% if not stripe_enabled %} (Stub mode — accepting any input for now.){% endif %}</p>
 
             <div class="pp-form-row">
                 <label class="pp-label">Promo code</label>
@@ -109,11 +109,19 @@
                 <div class="pp-help" id="promoStatus"></div>
             </div>
 
+            {% if stripe_enabled %}
+            <div class="pp-form-row">
+                <label class="pp-label">Card details</label>
+                <div id="paymentElement"><div class="pp-text-sm pp-text-muted">Loading secure card form…</div></div>
+            </div>
+            <div id="paymentMsg" class="pp-text-sm" style="color:#c0392b; display:none; margin-top:8px;"></div>
+            {% else %}
             <div class="pp-form-row"><label class="pp-label">Card details</label><div class="pp-input" style="padding: 14px; color: var(--pp-text-light); font-family: monospace;">[Stripe Elements mount point]</div></div>
             <div class="pp-auth-grid-2">
                 <div class="pp-form-row"><label class="pp-label">Cardholder name</label><input class="pp-input" type="text" placeholder="As on card"></div>
                 <div class="pp-form-row"><label class="pp-label">ZIP / Postal</label><input class="pp-input" type="text" placeholder="10001"></div>
             </div>
+            {% endif %}
 
             <div class="pp-divider"></div>
             <div class="pp-flex-between">
@@ -177,6 +185,11 @@ const state = {
     quote: null,
     job: null,
 };
+
+// Real Stripe (Payment Element) vs stub instant-pay (set server-side).
+const STRIPE_ENABLED = {{ 'true' if stripe_enabled else 'false' }};
+const STRIPE_PK = {{ stripe_publishable_key | tojson }};
+let _stripe = null, _elements = null;
 
 function goToStep(n) {
     state.step = n;
@@ -347,7 +360,37 @@ async function refreshQuote() {
     } else { dRow.style.display = 'none'; }
 }
 
-document.getElementById('step2Next').addEventListener('click', () => { renderFinal(); goToStep(3); });
+document.getElementById('step2Next').addEventListener('click', async () => {
+    renderFinal();
+    goToStep(3);
+    if (STRIPE_ENABLED) await preparePurchasePayment();
+});
+
+// Stripe: create the purchase job + PaymentIntent, mount the Payment Element.
+async function preparePurchasePayment() {
+    const payBtn = document.getElementById('step3Pay');
+    const msg = document.getElementById('paymentMsg');
+    payBtn.disabled = true;
+    if (msg) msg.style.display = 'none';
+    try {
+        const sel = Array.from(state.selected).map(vid => ({
+            vertical_id: vid, subcategory_ids: Array.from(state.subsel[vid] || []),
+        }));
+        const job = await gmFetch('/api/purchase-jobs', {
+            method: 'POST',
+            body: { selected_verticals: sel, volume: state.volume, promo_code: state.promo },
+        });
+        state.job = job;
+        const r = await gmFetch(`/api/purchase-jobs/${job.id}/pay`, { method: 'POST' });
+        if (!r.client_secret) return;
+        _stripe = Stripe(r.publishable_key || STRIPE_PK);
+        _elements = _stripe.elements({ clientSecret: r.client_secret, appearance: { theme: 'stripe' } });
+        _elements.create('payment').mount('#paymentElement');
+        payBtn.disabled = false;
+    } catch (e) {
+        if (msg) { msg.textContent = 'Could not start payment: ' + e.message; msg.style.display = ''; }
+    }
+}
 
 function renderFinal() {
     const quote = state.quote;
@@ -383,9 +426,44 @@ document.getElementById('applyPromo').addEventListener('click', async () => {
     }
 });
 
+function showPurchaseDownload(job) {
+    document.getElementById('dlFilename').textContent = job.result_filename || '—';
+    document.getElementById('dlRows').textContent = fmtNum(job.volume) + ' records';
+    document.getElementById('dlLink').href = `/api/purchase-jobs/${job.id}/download`;
+    goToStep(4);
+}
+
 document.getElementById('step3Pay').addEventListener('click', async e => {
     const btn = e.currentTarget;
     const orig = btn.innerHTML;
+    const msg = document.getElementById('paymentMsg');
+
+    if (STRIPE_ENABLED) {
+        if (!_stripe || !_elements || !state.job) { await preparePurchasePayment(); if (!_elements) return; }
+        btn.disabled = true; btn.textContent = 'Processing…'; if (msg) msg.style.display = 'none';
+        const { error } = await _stripe.confirmPayment({
+            elements: _elements,
+            confirmParams: { return_url: `${window.location.origin}/buy` },
+            redirect: 'if_required',
+        });
+        if (error) {
+            if (msg) { msg.textContent = error.message || 'Payment failed.'; msg.style.display = ''; }
+            else alert(error.message || 'Payment failed.');
+            btn.disabled = false; btn.innerHTML = orig;
+            return;
+        }
+        try {
+            const done = await gmFetch(`/api/purchase-jobs/${state.job.id}/payment-confirm`, { method: 'POST' });
+            showPurchaseDownload(done);
+        } catch (err) {
+            alert('Payment captured, but finalizing failed: ' + err.message + '. Check Job History.');
+        } finally {
+            btn.disabled = false; btn.innerHTML = orig;
+        }
+        return;
+    }
+
+    // ── Stub instant-pay (Stripe off) ──
     btn.disabled = true; btn.textContent = 'Processing payment…';
     try {
         const sel = Array.from(state.selected).map(vid => ({
@@ -397,11 +475,7 @@ document.getElementById('step3Pay').addEventListener('click', async e => {
             body: { selected_verticals: sel, volume: state.volume, promo_code: state.promo },
         });
         const completed = await gmFetch(`/api/purchase-jobs/${job.id}/pay`, { method: 'POST' });
-        state.job = completed;
-        document.getElementById('dlFilename').textContent = completed.result_filename || '—';
-        document.getElementById('dlRows').textContent = fmtNum(completed.volume) + ' records';
-        document.getElementById('dlLink').href = `/api/purchase-jobs/${completed.id}/download`;
-        goToStep(4);
+        showPurchaseDownload(completed);
     } catch (e) {
         alert('Payment failed: ' + e.message);
     } finally {

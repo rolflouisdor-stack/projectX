@@ -186,12 +186,21 @@
     <div class="pp-grid-2">
         <div class="pp-card">
             <div class="pp-card-title">Payment</div>
+            {% if stripe_enabled %}
+            <p class="pp-card-sub" style="margin-top:-8px;">Secure card payment via Stripe.</p>
+            <div class="pp-form-row">
+                <label class="pp-label">Card details</label>
+                <div id="paymentElement"><div class="pp-text-sm pp-text-muted">Loading secure card form…</div></div>
+            </div>
+            <div id="paymentMsg" class="pp-text-sm" style="color:#c0392b; display:none; margin-top:8px;"></div>
+            {% else %}
             <p class="pp-card-sub" style="margin-top:-8px;">Secure card payment via Stripe. (Stub mode — accepting any input for now.)</p>
             <div class="pp-form-row"><label class="pp-label">Card details</label><div class="pp-input" style="padding: 14px; color: var(--pp-text-light); font-family: monospace;">[Stripe Elements mount point]</div></div>
             <div class="pp-auth-grid-2">
                 <div class="pp-form-row"><label class="pp-label">Cardholder name</label><input class="pp-input" type="text" placeholder="As on card"></div>
                 <div class="pp-form-row"><label class="pp-label">ZIP / Postal</label><input class="pp-input" type="text" placeholder="10001"></div>
             </div>
+            {% endif %}
             {% if eo_enabled %}
             <p class="pp-text-sm pp-text-muted" style="margin-top:4px;">After you pay, your list goes to our validation partner (EmailOversight) for cleaning. This runs in a queue and can take anywhere from minutes to several hours depending on size. <strong>You can close this page</strong> — we'll email you when your cleaned file is ready to download.</p>
             {% else %}
@@ -284,6 +293,11 @@ const state = {
 
 // EmailOversight cleaning flow vs legacy mock-scrub flow (set server-side).
 const EO_ENABLED = {{ 'true' if eo_enabled else 'false' }};
+
+// Real Stripe (Payment Element) vs stub instant-pay (set server-side).
+const STRIPE_ENABLED = {{ 'true' if stripe_enabled else 'false' }};
+const STRIPE_PK = {{ stripe_publishable_key | tojson }};
+let _stripe = null, _elements = null;
 
 function goToStep(n) {
     state.step = n;
@@ -705,28 +719,74 @@ function renderResults(job) {
     document.getElementById('payAmount').textContent = fmtMoney(job.price_cents);
 }
 
-document.getElementById('step4Next').addEventListener('click', () => goToStep(5));
+document.getElementById('step4Next').addEventListener('click', () => enterPaymentStep());
+
+// Enter the payment step; with real Stripe, create the PaymentIntent and mount
+// the Payment Element so the card form is ready before the user clicks Pay.
+async function enterPaymentStep() {
+    goToStep(5);
+    if (STRIPE_ENABLED) await mountScrubPayment();
+}
+
+async function mountScrubPayment() {
+    const payBtn = document.getElementById('step5Pay');
+    const msg = document.getElementById('paymentMsg');
+    payBtn.disabled = true;
+    if (msg) { msg.style.display = 'none'; }
+    try {
+        const r = await gmFetch(`/api/scrub-jobs/${state.job.id}/pay`, { method: 'POST' });
+        if (!r.client_secret) return;   // stub fallback — shouldn't happen when enabled
+        _stripe = Stripe(r.publishable_key || STRIPE_PK);
+        _elements = _stripe.elements({ clientSecret: r.client_secret, appearance: { theme: 'stripe' } });
+        _elements.create('payment').mount('#paymentElement');
+        payBtn.disabled = false;
+    } catch (e) {
+        if (msg) { msg.textContent = 'Could not start payment: ' + e.message; msg.style.display = ''; }
+    }
+}
+
+// After payment succeeds, route to the right "what happens next" view.
+async function afterScrubPaid(btn, orig) {
+    if (EO_ENABLED) { showEoPending(); return; }   // long FIFO clean — email when ready
+    btn.textContent = 'Generating your file…';
+    try { await waitForArtifactThenShowDownload(); }
+    catch (e) { alert('File generation failed: ' + e.message); }
+    finally { btn.disabled = false; btn.innerHTML = orig; }
+}
 
 document.getElementById('step5Pay').addEventListener('click', async e => {
     const btn = e.currentTarget;
     const orig = btn.innerHTML;
+    const msg = document.getElementById('paymentMsg');
+
+    if (STRIPE_ENABLED) {
+        if (!_stripe || !_elements) { await mountScrubPayment(); if (!_elements) return; }
+        btn.disabled = true; btn.textContent = 'Processing…'; if (msg) msg.style.display = 'none';
+        const { error } = await _stripe.confirmPayment({
+            elements: _elements,
+            confirmParams: { return_url: `${window.location.origin}/scrub?job=${state.job.id}` },
+            redirect: 'if_required',
+        });
+        if (error) {
+            if (msg) { msg.textContent = error.message || 'Payment failed.'; msg.style.display = ''; }
+            else alert(error.message || 'Payment failed.');
+            btn.disabled = false; btn.innerHTML = orig;
+            return;
+        }
+        // Card confirmed — verify server-side + advance the job (webhook backs this up).
+        try { await gmFetch(`/api/scrub-jobs/${state.job.id}/payment-confirm`, { method: 'POST' }); }
+        catch (_) { /* webhook will still advance it; proceed */ }
+        await afterScrubPaid(btn, orig);
+        return;
+    }
+
+    // ── Stub instant-pay (Stripe off) ──
     btn.disabled = true; btn.textContent = 'Processing payment…';
     try {
         await gmFetch(`/api/scrub-jobs/${state.job.id}/pay`, { method: 'POST' });
-        if (EO_ENABLED) {
-            // Payment sends the list to EmailOversight via FTP for cleaning. EO is
-            // a slow FIFO queue (minutes to hours), so there's no file to hand over
-            // now — show the "cleaning in progress, we'll email you" state.
-            showEoPending();
-            return;
-        }
-        // The result file is generated by the worker (off the request path), so
-        // poll until the job is complete before handing over the download.
-        btn.textContent = 'Generating your file…';
-        await waitForArtifactThenShowDownload();
+        await afterScrubPaid(btn, orig);
     } catch (e) {
         alert('Payment failed: ' + e.message);
-    } finally {
         btn.disabled = false; btn.innerHTML = orig;
     }
 });

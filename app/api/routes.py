@@ -521,6 +521,31 @@ def pay_scrub_job(job_id):
     return jsonify(job.to_dict())
 
 
+@api_bp.route('/scrub-jobs/<int:job_id>/payment-confirm', methods=['POST'])
+@mailer_login_required
+def confirm_scrub_payment(job_id):
+    """Called by the client right after Stripe confirms the card. We re-verify
+    the PaymentIntent status server-side, then advance the job. Idempotent and
+    safe alongside the webhook (whichever lands first wins; the other no-ops)."""
+    db = get_db()
+    job = db.query(ScrubJob).filter_by(id=job_id, company_id=g.current_company.id).first()
+    if not job:
+        return jsonify({'error': 'not found'}), 404
+    if not stripe_service.enabled():
+        return jsonify(job.to_dict())   # stub already advanced at /pay
+    if not job.stripe_payment_intent_id:
+        return jsonify({'error': 'no payment in progress'}), 409
+    pi = stripe_service.retrieve_payment_intent(job.stripe_payment_intent_id)
+    status = pi['status'] if isinstance(pi, dict) else getattr(pi, 'status', None)
+    if status != 'succeeded':
+        return jsonify({'error': f'payment not completed ({status})', 'status': status}), 402
+    if not job.paid_at:
+        job.paid_at = datetime.utcnow()
+        db.commit()
+    _advance_paid_scrub_job(db, job)
+    return jsonify(job.to_dict())
+
+
 # ── Purchase jobs ─────────────────────────────────────────────────────────
 
 @api_bp.route('/purchase-jobs/quote', methods=['POST'])
@@ -650,6 +675,27 @@ def pay_purchase_job(job_id):
             'job': job.to_dict(),
         })
 
+    _complete_paid_purchase_job(db, job)
+    return jsonify(job.to_dict())
+
+
+@api_bp.route('/purchase-jobs/<int:job_id>/payment-confirm', methods=['POST'])
+@mailer_login_required
+def confirm_purchase_payment(job_id):
+    """Verify the PaymentIntent server-side after the client confirms, then
+    generate + complete the purchase. Idempotent; webhook is the backstop."""
+    db = get_db()
+    job = db.query(PurchaseJob).filter_by(id=job_id, company_id=g.current_company.id).first()
+    if not job:
+        return jsonify({'error': 'not found'}), 404
+    if not stripe_service.enabled():
+        return jsonify(job.to_dict())
+    if not job.stripe_payment_intent_id:
+        return jsonify({'error': 'no payment in progress'}), 409
+    pi = stripe_service.retrieve_payment_intent(job.stripe_payment_intent_id)
+    status = pi['status'] if isinstance(pi, dict) else getattr(pi, 'status', None)
+    if status != 'succeeded':
+        return jsonify({'error': f'payment not completed ({status})', 'status': status}), 402
     _complete_paid_purchase_job(db, job)
     return jsonify(job.to_dict())
 

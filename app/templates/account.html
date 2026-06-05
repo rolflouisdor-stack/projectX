@@ -76,6 +76,16 @@
     </div>
 
     <form id="cardForm">
+        {% if stripe_enabled %}
+        <div class="pp-form-row">
+            <label class="pp-label">Card details</label>
+            <div id="cardPaymentElement"><div class="pp-text-sm pp-text-muted">Loading secure card form…</div></div>
+        </div>
+        <div class="pp-text-sm pp-text-muted pp-mb-12">
+            Card details are handled by Stripe — your full card number never reaches our servers.
+            We keep only the brand, last four digits, and expiry on file.
+        </div>
+        {% else %}
         <div class="pp-form-row">
             <label class="pp-label" for="cardholder_name">Cardholder name</label>
             <input class="pp-input" type="text" id="cardholder_name" placeholder="Jane Doe" autocomplete="cc-name">
@@ -100,8 +110,8 @@
         </div>
         <div class="pp-text-sm pp-text-muted pp-mb-12">
             We never store your full card number. Only brand, last four digits, and expiry are kept on file.
-            Production wiring uses Stripe Elements so the PAN never reaches our servers.
         </div>
+        {% endif %}
         <div style="display:flex; align-items:center; gap:12px;">
             <button type="submit" class="pp-btn pp-btn-primary" id="cardSubmitBtn">Save card</button>
             <span class="pp-text-sm" id="cardStatus" style="display:none;"></span>
@@ -114,6 +124,26 @@ const BRAND_GLYPHS = {
     visa: '💳', mastercard: '💳', amex: '💳', discover: '💳',
     diners: '💳', jcb: '💳', card: '💳'
 };
+
+// Real Stripe (SetupIntent + Element) vs stub manual-card form (set server-side).
+const STRIPE_ENABLED = {{ 'true' if stripe_enabled else 'false' }};
+const STRIPE_PK = {{ stripe_publishable_key | tojson }};
+let _stripe = null, _cardElements = null;
+
+// Create a SetupIntent + mount the card Element so the user can save a card
+// without the PAN ever touching our server.
+async function mountCardSetup() {
+    const holder = document.getElementById('cardPaymentElement');
+    if (!holder) return;
+    try {
+        const r = await gmFetch('/api/account/payment-method/setup-intent', { method: 'POST' });
+        _stripe = Stripe(r.publishable_key || STRIPE_PK);
+        _cardElements = _stripe.elements({ clientSecret: r.client_secret, appearance: { theme: 'stripe' } });
+        _cardElements.create('payment').mount('#cardPaymentElement');
+    } catch (e) {
+        holder.innerHTML = `<span class="pp-text-sm" style="color:#b91c1c;">Could not load card form: ${e.message}</span>`;
+    }
+}
 
 function showStatus(el, msg, kind) {
     el.textContent = msg;
@@ -194,6 +224,34 @@ document.getElementById('companyForm').addEventListener('submit', async (e) => {
 document.getElementById('cardForm').addEventListener('submit', async (e) => {
     e.preventDefault();
     const status = document.getElementById('cardStatus');
+    const btn = document.getElementById('cardSubmitBtn');
+
+    if (STRIPE_ENABLED) {
+        if (!_stripe || !_cardElements) { await mountCardSetup(); if (!_cardElements) return; }
+        const orig = btn.textContent;
+        btn.disabled = true; btn.textContent = 'Saving…';
+        try {
+            const { error, setupIntent } = await _stripe.confirmSetup({
+                elements: _cardElements,
+                confirmParams: { return_url: `${window.location.origin}/account` },
+                redirect: 'if_required',
+            });
+            if (error) { showStatus(status, error.message || 'Could not save card', 'error'); return; }
+            const pm = await gmFetch('/api/account/payment-method/confirm', {
+                method: 'POST', body: { payment_method_id: setupIntent.payment_method },
+            });
+            paintCard(pm);
+            showStatus(status, 'Card saved', 'ok');
+            await mountCardSetup();   // fresh SetupIntent so they can replace again
+        } catch (err) {
+            showStatus(status, err.message, 'error');
+        } finally {
+            btn.disabled = false; btn.textContent = orig;
+        }
+        return;
+    }
+
+    // ── Stub manual-card form (Stripe off) ──
     try {
         const pm = await gmFetch('/api/account/payment-method', {
             method: 'PUT',
@@ -226,6 +284,9 @@ document.getElementById('removeCardBtn').addEventListener('click', async () => {
     }
 });
 
-document.addEventListener('DOMContentLoaded', loadAccount);
+document.addEventListener('DOMContentLoaded', async () => {
+    await loadAccount();
+    if (STRIPE_ENABLED) mountCardSetup();
+});
 </script>
 {% endblock %}

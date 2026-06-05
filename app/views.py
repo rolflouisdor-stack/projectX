@@ -10,6 +10,14 @@ def _common_ctx(user=None, company=None):
             'user': user.to_dict() if user else None}
 
 
+def _stripe_ctx():
+    """Stripe flags for payment pages. publishable key is safe to expose."""
+    return {
+        'stripe_enabled': bool(current_app.config.get('STRIPE_ENABLED')),
+        'stripe_publishable_key': current_app.config.get('STRIPE_PUBLISHABLE_KEY') or '',
+    }
+
+
 @views_bp.route('/')
 def root():
     user, company = current_user_or_none()
@@ -40,13 +48,13 @@ def scrub_page():
     # EO flow (clean via EmailOversight) vs legacy mock-scrub flow drives which
     # wizard steps render. Off until EO_FTP_ENABLED is set.
     return render_template('scrub.html', eo_enabled=bool(current_app.config.get('EO_FTP_ENABLED')),
-                           **_common_ctx(g.current_user, g.current_company))
+                           **_stripe_ctx(), **_common_ctx(g.current_user, g.current_company))
 
 
 @views_bp.route('/buy')
 @mailer_login_required
 def buy_page():
-    return render_template('buy.html', **_common_ctx(g.current_user, g.current_company))
+    return render_template('buy.html', **_stripe_ctx(), **_common_ctx(g.current_user, g.current_company))
 
 
 @views_bp.route('/jobs')
@@ -58,4 +66,4 @@ def jobs_page():
 @views_bp.route('/account')
 @mailer_login_required
 def account_page():
-    return render_template('account.html', **_common_ctx(g.current_user, g.current_company))
+    return render_template('account.html', **_stripe_ctx(), **_common_ctx(g.current_user, g.current_company))
