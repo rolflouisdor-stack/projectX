@@ -189,7 +189,18 @@ const state = {
 // Real Stripe (Payment Element) vs stub instant-pay (set server-side).
 const STRIPE_ENABLED = {{ 'true' if stripe_enabled else 'false' }};
 const STRIPE_PK = {{ stripe_publishable_key | tojson }};
+const PASS_FEE = {{ 'true' if stripe_pass_fee else 'false' }};
+const FEE_PCT = {{ stripe_fee_percent }};
+const FEE_FIXED = {{ stripe_fee_fixed_cents }};
 let _stripe = null, _elements = null;
+
+function grossUp(baseCents) {
+    baseCents = Math.max(0, Math.round(baseCents || 0));
+    if (!PASS_FEE || !STRIPE_ENABLED || baseCents <= 0 || FEE_PCT >= 100)
+        return { base: baseCents, fee: 0, total: baseCents };
+    const total = Math.ceil((baseCents + FEE_FIXED) / (1 - FEE_PCT / 100));
+    return { base: baseCents, fee: total - baseCents, total };
+}
 
 function goToStep(n) {
     state.step = n;
@@ -383,6 +394,7 @@ async function preparePurchasePayment() {
         state.job = job;
         const r = await gmFetch(`/api/purchase-jobs/${job.id}/pay`, { method: 'POST' });
         if (!r.client_secret) return;
+        if (r.amount_cents != null) document.getElementById('payAmount').textContent = fmtMoney(r.amount_cents);
         _stripe = Stripe(r.publishable_key || STRIPE_PK);
         _elements = _stripe.elements({ clientSecret: r.client_secret, appearance: { theme: 'stripe' } });
         _elements.create('payment').mount('#paymentElement');
@@ -396,13 +408,15 @@ function renderFinal() {
     const quote = state.quote;
     if (!quote) return;
     const tbody = document.getElementById('finalSummaryRows');
+    const g = grossUp(quote.price_cents);
     tbody.innerHTML = quote.rows.map(r => `
         <tr><td class="pp-text-muted">${r.vertical_name}</td><td class="number">${fmtNum(r.records)} × $${r.base_rate.toFixed(3)}</td></tr>
     `).join('') +
         `<tr><td class="pp-text-muted">Subtotal</td><td class="number">${fmtMoney(quote.subtotal_cents)}</td></tr>` +
-        (quote.discount_cents > 0 ? `<tr><td class="pp-text-muted">Discount</td><td class="number" style="color: var(--pp-success);">−${fmtMoney(quote.discount_cents)}</td></tr>` : '');
-    document.getElementById('finalTotal').textContent = fmtMoney(quote.price_cents);
-    document.getElementById('payAmount').textContent = fmtMoney(quote.price_cents);
+        (quote.discount_cents > 0 ? `<tr><td class="pp-text-muted">Discount</td><td class="number" style="color: var(--pp-success);">−${fmtMoney(quote.discount_cents)}</td></tr>` : '') +
+        (g.fee > 0 ? `<tr><td class="pp-text-muted">Card processing fee</td><td class="number">${fmtMoney(g.fee)}</td></tr>` : '');
+    document.getElementById('finalTotal').textContent = fmtMoney(g.total);
+    document.getElementById('payAmount').textContent = fmtMoney(g.total);
 }
 
 document.getElementById('applyPromo').addEventListener('click', async () => {

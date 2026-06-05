@@ -15,6 +15,9 @@ def _stripe_ctx():
     return {
         'stripe_enabled': bool(current_app.config.get('STRIPE_ENABLED')),
         'stripe_publishable_key': current_app.config.get('STRIPE_PUBLISHABLE_KEY') or '',
+        'stripe_pass_fee': bool(current_app.config.get('STRIPE_PASS_FEE')),
+        'stripe_fee_percent': float(current_app.config.get('STRIPE_FEE_PERCENT') or 0),
+        'stripe_fee_fixed_cents': int(current_app.config.get('STRIPE_FEE_FIXED_CENTS') or 0),
     }
 
 

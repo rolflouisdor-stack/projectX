@@ -59,6 +59,13 @@ class Config:
     # quoted price and the charge agree (tiny EO cleans would otherwise be < 50¢).
     MIN_CHARGE_CENTS = int(os.getenv('MIN_CHARGE_CENTS', 50))
 
+    # Pass Stripe's processing fee to the customer: gross up the charged amount so
+    # the payout NETS the quoted price. Fee = pct*total + fixed (computed on the
+    # gross), so total = (base + fixed) / (1 - pct/100). Defaults = US online rate.
+    STRIPE_PASS_FEE = os.getenv('STRIPE_PASS_FEE', 'true').lower() in ('true', '1', 'yes')
+    STRIPE_FEE_PERCENT = float(os.getenv('STRIPE_FEE_PERCENT', 2.9))
+    STRIPE_FEE_FIXED_CENTS = int(os.getenv('STRIPE_FEE_FIXED_CENTS', 30))
+
     EMAIL_VALIDATOR_ENABLED = os.getenv('EMAIL_VALIDATOR_ENABLED', 'false').lower() in ('true', '1', 'yes')
     EMAIL_VALIDATOR_PROVIDER = os.getenv('EMAIL_VALIDATOR_PROVIDER', 'neverbounce')
     EMAIL_VALIDATOR_API_KEY = os.getenv('EMAIL_VALIDATOR_API_KEY', '')

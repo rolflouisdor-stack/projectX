@@ -222,6 +222,8 @@
                     <tr><td class="pp-text-muted">Unique records</td><td class="number" id="osUnique">—</td></tr>
                     {% endif %}
                     <tr><td class="pp-text-muted">Rate</td><td class="number" id="osRate">$0.00 / record</td></tr>
+                    <tr id="osSubtotalRow" style="display:none;"><td class="pp-text-muted">Subtotal</td><td class="number money" id="osSubtotal">$0</td></tr>
+                    <tr id="osFeeRow" style="display:none;"><td class="pp-text-muted">Card processing fee</td><td class="number money" id="osFee">$0</td></tr>
                     <tr style="font-weight:700;"><td>Total</td><td class="number money" id="osTotal">$0</td></tr>
                 </tbody>
             </table>
@@ -297,7 +299,20 @@ const EO_ENABLED = {{ 'true' if eo_enabled else 'false' }};
 // Real Stripe (Payment Element) vs stub instant-pay (set server-side).
 const STRIPE_ENABLED = {{ 'true' if stripe_enabled else 'false' }};
 const STRIPE_PK = {{ stripe_publishable_key | tojson }};
+const PASS_FEE = {{ 'true' if stripe_pass_fee else 'false' }};
+const FEE_PCT = {{ stripe_fee_percent }};
+const FEE_FIXED = {{ stripe_fee_fixed_cents }};
 let _stripe = null, _elements = null;
+
+// Gross up a base amount (cents) so the Stripe payout nets it. Mirrors the
+// server's pricing.add_processing_fee exactly (same ceil formula).
+function grossUp(baseCents) {
+    baseCents = Math.max(0, Math.round(baseCents || 0));
+    if (!PASS_FEE || !STRIPE_ENABLED || baseCents <= 0 || FEE_PCT >= 100)
+        return { base: baseCents, fee: 0, total: baseCents };
+    const total = Math.ceil((baseCents + FEE_FIXED) / (1 - FEE_PCT / 100));
+    return { base: baseCents, fee: total - baseCents, total };
+}
 
 function goToStep(n) {
     state.step = n;
@@ -681,18 +696,36 @@ async function pollJob() {
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
+// Apply the order totals + (when Stripe passes the fee) a processing-fee line.
+// rsPrice/osTotal/payAmount show the grossed-up total actually charged.
+function applyOrderTotals(job) {
+    const g = grossUp(job.price_cents);
+    const showFee = g.fee > 0;
+    const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+    set('rsPrice', fmtMoney(g.total));
+    set('osSubtotal', fmtMoney(g.base));
+    set('osFee', fmtMoney(g.fee));
+    set('osTotal', fmtMoney(g.total));
+    set('payAmount', fmtMoney(g.total));
+    const sr = document.getElementById('osSubtotalRow'), fr = document.getElementById('osFeeRow');
+    if (sr) sr.style.display = showFee ? '' : 'none';
+    if (fr) fr.style.display = showFee ? '' : 'none';
+    if (showFee) {
+        const d = document.getElementById('rsPriceDetail');
+        if (d) d.textContent += ` · incl. ${fmtMoney(g.fee)} card processing fee`;
+    }
+}
+
 function renderResults(job) {
     if (EO_ENABLED) {
         document.getElementById('rsUploaded').textContent = fmtNum(job.uploaded_count);
-        document.getElementById('rsPrice').textContent = fmtMoney(job.price_cents);
         const rawCents = Math.round((job.uploaded_count || 0) * (job.rate_per_record || 0) * 100);
         let detail = `${fmtNum(job.uploaded_count)} records × $${job.rate_per_record.toFixed(6)}`;
         if (rawCents < job.price_cents) detail += ` · ${fmtMoney(job.price_cents)} minimum`;
         document.getElementById('rsPriceDetail').textContent = detail;
         document.getElementById('osUploaded').textContent = fmtNum(job.uploaded_count);
         document.getElementById('osRate').textContent = `$${job.rate_per_record.toFixed(6)} / record`;
-        document.getElementById('osTotal').textContent = fmtMoney(job.price_cents);
-        document.getElementById('payAmount').textContent = fmtMoney(job.price_cents);
+        applyOrderTotals(job);
         return;
     }
     document.getElementById('rsUploaded').textContent = fmtNum(job.uploaded_count);
@@ -708,7 +741,6 @@ function renderResults(job) {
     } else {
         cleanCard.style.display = 'none';
     }
-    document.getElementById('rsPrice').textContent = fmtMoney(job.price_cents);
     document.getElementById('rsPriceDetail').textContent =
         `${fmtNum(job.unique_count)} unique × $${job.rate_per_record.toFixed(4)}` +
         (job.cleaning_opted_in ? ' (incl. 20% cleaning premium)' : '');
@@ -716,9 +748,8 @@ function renderResults(job) {
     document.getElementById('osUploaded').textContent = fmtNum(job.uploaded_count);
     document.getElementById('osUnique').textContent = fmtNum(job.unique_count);
     document.getElementById('osRate').textContent = `$${job.rate_per_record.toFixed(4)} / record`;
-    document.getElementById('osTotal').textContent = fmtMoney(job.price_cents);
     document.getElementById('osCleanRow').style.display = job.cleaning_opted_in ? '' : 'none';
-    document.getElementById('payAmount').textContent = fmtMoney(job.price_cents);
+    applyOrderTotals(job);
 }
 
 document.getElementById('step4Next').addEventListener('click', () => enterPaymentStep());
@@ -738,6 +769,16 @@ async function mountScrubPayment() {
     try {
         const r = await gmFetch(`/api/scrub-jobs/${state.job.id}/pay`, { method: 'POST' });
         if (!r.client_secret) return;   // stub fallback — shouldn't happen when enabled
+        // Authoritative amounts from the server (incl. processing fee).
+        if (r.amount_cents != null) {
+            const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = fmtMoney(v); };
+            set('payAmount', r.amount_cents); set('osTotal', r.amount_cents);
+            if (r.fee_cents > 0) {
+                set('osSubtotal', r.base_cents); set('osFee', r.fee_cents);
+                const sr = document.getElementById('osSubtotalRow'), fr = document.getElementById('osFeeRow');
+                if (sr) sr.style.display = ''; if (fr) fr.style.display = '';
+            }
+        }
         _stripe = Stripe(r.publishable_key || STRIPE_PK);
         _elements = _stripe.elements({ clientSecret: r.client_secret, appearance: { theme: 'stripe' } });
         _elements.create('payment').mount('#paymentElement');

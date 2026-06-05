@@ -32,6 +32,26 @@ def eo_margin_pct(record_count: int) -> Decimal:
     return Decimal(str(cfg.get('EO_MARGIN_PCT_SMALL') or 40))
 
 
+def add_processing_fee(base_cents: int) -> dict:
+    """Gross up an order total so the Stripe payout nets `base_cents`.
+
+    Stripe's fee is pct*gross + fixed, charged on the total. To net `base`:
+        net = total - (pct*total + fixed) = base  ⇒  total = (base + fixed)/(1 - pct)
+    Returns {base_cents, fee_cents, total_cents}. No-op when pass-through is off
+    or base is 0 (free / nothing to charge).
+    """
+    cfg = current_app.config
+    base = max(0, int(base_cents or 0))
+    if base <= 0 or not cfg.get('STRIPE_PASS_FEE'):
+        return {'base_cents': base, 'fee_cents': 0, 'total_cents': base}
+    pct = Decimal(str(cfg.get('STRIPE_FEE_PERCENT') or 0)) / Decimal(100)
+    fixed = int(cfg.get('STRIPE_FEE_FIXED_CENTS') or 0)
+    if pct >= 1:
+        return {'base_cents': base, 'fee_cents': 0, 'total_cents': base}
+    total = int(math.ceil((Decimal(base) + Decimal(fixed)) / (Decimal(1) - pct)))
+    return {'base_cents': base, 'fee_cents': total - base, 'total_cents': total}
+
+
 def calc_eo_clean_price(record_count: int) -> dict:
     """Price an EmailOversight cleaning job: per-record EO cost + tiered margin.
 

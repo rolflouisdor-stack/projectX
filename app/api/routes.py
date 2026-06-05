@@ -22,7 +22,7 @@ from app.models.activity_log import (
     ACTION_PURCHASE, ACTION_DOWNLOAD, ACTION_APPLY_PROMO, ACTION_DELETE_JOB,
 )
 from app.services.activity_logger import log_activity
-from app.services.pricing import calc_purchase_quote
+from app.services.pricing import calc_purchase_quote, add_processing_fee
 from app.services.xlsx_generator import generate_purchase_artifact
 from app.services import stripe_service
 from app.services.stripe_service import create_payment_intent
@@ -493,9 +493,11 @@ def pay_scrub_job(job_id):
         customer_id = stripe_service.ensure_customer(g.current_company)
         g.current_company.stripe_customer_id = customer_id
 
+    fee = add_processing_fee(int(job.price_cents or 0))   # gross up so payout nets the price
     intent = create_payment_intent(
-        int(job.price_cents or 0), description=desc,
-        metadata={'kind': 'scrub', 'job_id': job.id, 'company_id': job.company_id},
+        fee['total_cents'], description=desc,
+        metadata={'kind': 'scrub', 'job_id': job.id, 'company_id': job.company_id,
+                  'base_cents': fee['base_cents'], 'fee_cents': fee['fee_cents']},
         customer_id=customer_id,
     )
     job.stripe_payment_intent_id = intent['id']
@@ -508,7 +510,9 @@ def pay_scrub_job(job_id):
             'requires_payment': True,
             'client_secret': intent['client_secret'],
             'publishable_key': stripe_service.publishable_key(),
-            'amount_cents': int(job.price_cents or 0),
+            'base_cents': fee['base_cents'],
+            'fee_cents': fee['fee_cents'],
+            'amount_cents': fee['total_cents'],
             'job': job.to_dict(),
         })
 
@@ -657,9 +661,11 @@ def pay_purchase_job(job_id):
         customer_id = stripe_service.ensure_customer(g.current_company)
         g.current_company.stripe_customer_id = customer_id
 
+    fee = add_processing_fee(int(job.price_cents or 0))
     intent = create_payment_intent(
-        int(job.price_cents or 0), description=f'Gravitas purchase #{job.id}',
-        metadata={'kind': 'purchase', 'job_id': job.id, 'company_id': job.company_id},
+        fee['total_cents'], description=f'Gravitas purchase #{job.id}',
+        metadata={'kind': 'purchase', 'job_id': job.id, 'company_id': job.company_id,
+                  'base_cents': fee['base_cents'], 'fee_cents': fee['fee_cents']},
         customer_id=customer_id,
     )
     job.stripe_payment_intent_id = intent['id']
@@ -671,7 +677,9 @@ def pay_purchase_job(job_id):
             'requires_payment': True,
             'client_secret': intent['client_secret'],
             'publishable_key': stripe_service.publishable_key(),
-            'amount_cents': int(job.price_cents or 0),
+            'base_cents': fee['base_cents'],
+            'fee_cents': fee['fee_cents'],
+            'amount_cents': fee['total_cents'],
             'job': job.to_dict(),
         })
 
@@ -795,9 +803,13 @@ def list_jobs():
 def stripe_config():
     """Tell the front-end whether real Stripe is on + the publishable key, so it
     knows to mount the Payment Element vs. the stub instant-pay."""
+    from flask import current_app
     return jsonify({
         'enabled': stripe_service.enabled(),
         'publishable_key': stripe_service.publishable_key(),
+        'pass_fee': bool(current_app.config.get('STRIPE_PASS_FEE')),
+        'fee_percent': float(current_app.config.get('STRIPE_FEE_PERCENT') or 0),
+        'fee_fixed_cents': int(current_app.config.get('STRIPE_FEE_FIXED_CENTS') or 0),
     })
 
 
