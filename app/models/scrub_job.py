@@ -85,6 +85,8 @@ class ScrubJob(Base):
     )
 
     def to_dict(self):
+        from app.services.pricing import effective_total_cents
+        total = effective_total_cents(self.price_cents, self.amount_paid_cents)
         return {
             'id': self.id,
             'company_id': self.company_id,
@@ -101,8 +103,11 @@ class ScrubJob(Base):
             'unique_count': int(self.unique_count or 0),
             'overlap_count': int(self.overlap_count or 0),
             'rate_per_record': float(self.rate_per_record) if self.rate_per_record else 0.0,
-            'price_cents': int(self.price_cents or 0),
+            'price_cents': int(self.price_cents or 0),                 # pre-fee base (cleaning cost)
             'price_dollars': round(int(self.price_cents or 0) / 100, 2),
+            'amount_paid_cents': int(self.amount_paid_cents or 0),     # exact card charge; 0 = unpaid
+            'amount_total_cents': total,                               # what they pay/paid incl. card fee — show this
+            'amount_total_dollars': round(total / 100, 2),
             'result_filename': self.result_filename,
             'failure_reason': self.failure_reason,
             'created_at': self.created_at.isoformat() if self.created_at else None,

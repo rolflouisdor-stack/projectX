@@ -178,3 +178,7 @@ def run_migrations(engine):
 
     # ── purchase_jobs: Spaces-backed result ──
     _add_column(engine, 'purchase_jobs', 'result_s3_key', 'VARCHAR(500) NULL')
+
+    # Actual amount charged (price grossed up for the Stripe fee), mirroring
+    # scrub_jobs — so job history / dashboard show what the customer really paid.
+    _add_column(engine, 'purchase_jobs', 'amount_paid_cents', 'BIGINT NULL DEFAULT 0')

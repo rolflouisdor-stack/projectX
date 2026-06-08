@@ -52,6 +52,24 @@ def add_processing_fee(base_cents: int) -> dict:
     return {'base_cents': base, 'fee_cents': total - base, 'total_cents': total}
 
 
+def effective_total_cents(price_cents, amount_paid_cents=0) -> int:
+    """The amount the customer pays/paid INCLUDING the card processing fee.
+
+    Paid jobs return the exact charge stored at pay time; unpaid (quote) jobs
+    return the grossed-up total they would be charged. This is the single number
+    every customer-facing surface (checkout, email, job history, dashboard)
+    should show — never the pre-fee base `price_cents`. Falls back to the base
+    price if the fee config can't be read.
+    """
+    paid = int(amount_paid_cents or 0)
+    if paid > 0:
+        return paid
+    try:
+        return int(add_processing_fee(int(price_cents or 0)).get('total_cents', price_cents or 0))
+    except Exception:
+        return int(price_cents or 0)
+
+
 def calc_eo_clean_price(record_count: int) -> dict:
     """Price an EmailOversight cleaning job: per-record EO cost + tiered margin.
 

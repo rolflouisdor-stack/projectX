@@ -78,7 +78,7 @@ async function loadJobs() {
                 <td>${(p.created_at || '').slice(0, 10)}</td>
                 <td>${fmtNum(p.volume)}</td>
                 <td>${verts || '—'}</td>
-                <td class="number money">${fmtMoney(p.price_cents)}</td>
+                <td class="number money">${fmtMoney(p.amount_total_cents)}</td>
                 <td>${gmStatusBadge(p.status)}</td>
                 <td>${dl}</td>
             </tr>`;
@@ -93,7 +93,7 @@ async function loadJobs() {
                 <td>${(s.created_at || '').slice(0, 10)}</td>
                 <td class="number">${fmtNum(s.uploaded_count)}</td>
                 <td class="number">${fmtNum(s.unique_count)}</td>
-                <td class="number money">${fmtMoney(s.price_cents)}</td>
+                <td class="number money">${fmtMoney(s.amount_total_cents)}</td>
                 <td>${gmStatusBadge(s.status)}</td>
                 <td><div class="pp-flex" style="gap:6px; justify-content:flex-end; align-items:center;">${dl}<button class="pp-btn pp-btn-ghost pp-btn-sm" onclick="deleteJob(${s.id})">Delete</button></div></td>
             </tr>`;

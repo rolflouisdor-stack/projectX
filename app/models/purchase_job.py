@@ -25,7 +25,8 @@ class PurchaseJob(Base):
     subtotal_cents = Column(BigInteger, default=0)
     discount_cents = Column(BigInteger, default=0)
     promo_code = Column(String(40), nullable=True)
-    price_cents = Column(BigInteger, default=0)
+    price_cents = Column(BigInteger, default=0)             # pre-fee base price
+    amount_paid_cents = Column(BigInteger, default=0)       # actual card charge (price grossed up for the Stripe fee); 0 = unpaid/legacy
     stripe_payment_intent_id = Column(String(120), nullable=True)
     paid_at = Column(DateTime, nullable=True)
 
@@ -43,6 +44,8 @@ class PurchaseJob(Base):
     )
 
     def to_dict(self):
+        from app.services.pricing import effective_total_cents
+        total = effective_total_cents(self.price_cents, self.amount_paid_cents)
         return {
             'id': self.id,
             'company_id': self.company_id,
@@ -53,8 +56,11 @@ class PurchaseJob(Base):
             'subtotal_cents': int(self.subtotal_cents or 0),
             'discount_cents': int(self.discount_cents or 0),
             'promo_code': self.promo_code,
-            'price_cents': int(self.price_cents or 0),
+            'price_cents': int(self.price_cents or 0),                 # pre-fee base
             'price_dollars': round(int(self.price_cents or 0) / 100, 2),
+            'amount_paid_cents': int(self.amount_paid_cents or 0),     # exact card charge; 0 = unpaid
+            'amount_total_cents': total,                               # what they pay/paid incl. card fee — show this
+            'amount_total_dollars': round(total / 100, 2),
             'result_filename': self.result_filename,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'completed_at': self.completed_at.isoformat() if self.completed_at else None,

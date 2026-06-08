@@ -102,22 +102,28 @@ def dashboard_summary():
     purchases = (db.query(PurchaseJob).filter_by(company_id=cid)
                  .order_by(PurchaseJob.created_at.desc()).limit(3).all())
 
+    # Show the amount the customer pays/paid incl. the card processing fee
+    # (consistent with checkout, email, and job history) — never the pre-fee base.
+    from app.services.pricing import effective_total_cents
     recent = []
     for s in scrubs:
         recent.append({
             'kind': 'scrub', 'date': s.created_at.isoformat() if s.created_at else None,
-            'records': s.unique_count or 0, 'price_cents': s.price_cents or 0,
+            'records': s.unique_count or 0,
+            'price_cents': effective_total_cents(s.price_cents, s.amount_paid_cents),
             'status': s.status,
         })
     for p in purchases:
         recent.append({
             'kind': 'purchase', 'date': p.created_at.isoformat() if p.created_at else None,
-            'records': p.volume or 0, 'price_cents': p.price_cents or 0,
+            'records': p.volume or 0,
+            'price_cents': effective_total_cents(p.price_cents, p.amount_paid_cents),
             'status': p.status,
         })
     recent.sort(key=lambda r: r['date'] or '', reverse=True)
 
-    total_spent = sum((s.price_cents or 0) for s in scrubs) + sum((p.price_cents or 0) for p in purchases)
+    total_spent = (sum(effective_total_cents(s.price_cents, s.amount_paid_cents) for s in scrubs)
+                   + sum(effective_total_cents(p.price_cents, p.amount_paid_cents) for p in purchases))
     log_activity(cid, ACTION_VIEW_DASHBOARD, user_id=g.current_user.id)
     return jsonify({
         'recent': recent[:6],
@@ -663,6 +669,7 @@ def pay_purchase_job(job_id):
         g.current_company.stripe_customer_id = customer_id
 
     fee = add_processing_fee(int(job.price_cents or 0))
+    job.amount_paid_cents = fee['total_cents']            # the exact charge; shown in job history / dashboard
     intent = create_payment_intent(
         fee['total_cents'], description=f'Gravitas purchase #{job.id}',
         metadata={'kind': 'purchase', 'job_id': job.id, 'company_id': job.company_id,
