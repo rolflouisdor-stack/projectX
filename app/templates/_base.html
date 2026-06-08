@@ -87,7 +87,7 @@
         window.location.href = '/login';
     }
     function fmtNum(n) { return Number(n || 0).toLocaleString('en-US'); }
-    function fmtMoney(cents) { return '$' + (Number(cents || 0) / 100).toLocaleString('en-US', { maximumFractionDigits: 0 }); }
+    function fmtMoney(cents) { return '$' + (Number(cents || 0) / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
 
     // ─── Job-status badges + hover explanations (used by jobs + dashboard) ───
     // One source of truth for what each status means and how long it usually
