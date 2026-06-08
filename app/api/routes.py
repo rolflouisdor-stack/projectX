@@ -494,6 +494,7 @@ def pay_scrub_job(job_id):
         g.current_company.stripe_customer_id = customer_id
 
     fee = add_processing_fee(int(job.price_cents or 0))   # gross up so payout nets the price
+    job.amount_paid_cents = fee['total_cents']            # the exact charge; the email reports this, not the pre-fee base
     intent = create_payment_intent(
         fee['total_cents'], description=desc,
         metadata={'kind': 'scrub', 'job_id': job.id, 'company_id': job.company_id,

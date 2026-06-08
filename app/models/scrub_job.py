@@ -65,7 +65,8 @@ class ScrubJob(Base):
     overlap_count = Column(Integer, default=0)
 
     rate_per_record = Column(Numeric(12, 6), default=0)   # 6dp: EO rates are sub-cent ($0.000375 + tiered margin)
-    price_cents = Column(BigInteger, default=0)
+    price_cents = Column(BigInteger, default=0)           # base cleaning cost (records x rate), before the card fee
+    amount_paid_cents = Column(BigInteger, default=0)     # what the card was actually charged (price_cents grossed up for the Stripe fee); 0 = pre-payment / legacy
     stripe_payment_intent_id = Column(String(120), nullable=True)
     paid_at = Column(DateTime, nullable=True)
 
