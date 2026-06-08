@@ -1,6 +1,15 @@
 # Continue Context — rolling resume doc
 
-> **▶ RESUME 2026-06-05 — START HERE: [`RESUME_2026-06-05.md`](RESUME_2026-06-05.md)**.
+> **▶ RESUME 2026-06-08 — START HERE: [`RESUME_2026-06-08.md`](RESUME_2026-06-08.md)**.
+> Prod live/healthy on `ffc33a1`. Today = **pricing-display consistency fix**: the
+> amount actually charged (base price grossed up for the Stripe fee) now shows
+> identically across **checkout → email → Job History → dashboard**, and the UI no
+> longer rounds money to whole dollars. New columns `scrub_jobs.amount_paid_cents`
+> + `purchase_jobs.amount_paid_cents` (the exact charge, set at pay time); shared
+> helper `pricing.effective_total_cents()`; `to_dict` exposes `amount_total_cents`;
+> `fmtMoney` now shows 2 decimals. Detail in the resume doc.
+>
+> (Prior: 2026-06-05 — Stripe LIVE + EO clean flow LIVE; see [`RESUME_2026-06-05.md`](RESUME_2026-06-05.md).)
 > Prod live/healthy on `f4d7b13`. **EmailOversight clean flow is LIVE + proven at scale** (184k QA job
 > round-tripped; emails on a PROD Mandrill key). EO pricing tiered ($0.000375/rec; 40/35/30% by size).
 > **Stripe is LIVE in production** — Payment Element (scrub+buy) + SetupIntent saved cards, live keys +
