@@ -77,11 +77,25 @@ def retrieve_payment_intent(pi_id: str):
 
 def ensure_customer(company) -> str:
     """Return the Stripe Customer id for a company, creating one if needed.
-    Caller is responsible for persisting `company.stripe_customer_id`."""
+    Caller is responsible for persisting `company.stripe_customer_id`.
+
+    A stored id is verified before reuse: an id created under a different/old
+    Stripe account (e.g. before the test→live key switch) no longer exists, and
+    reusing it for a SetupIntent/PaymentIntent 500s with "No such customer".
+    When the stored id is stale or deleted we transparently mint a fresh
+    Customer so the caller persists the new id."""
+    s = _stripe()
     existing = getattr(company, 'stripe_customer_id', None)
     if existing:
-        return existing
-    cust = _stripe().Customer.create(
+        try:
+            cust = s.Customer.retrieve(existing)
+            if not getattr(cust, 'deleted', False):
+                return existing
+        except Exception:
+            # Unknown/stale id (wrong account, deleted, or key rotated) — fall
+            # through and create a new Customer under the current account.
+            pass
+    cust = s.Customer.create(
         name=company.company_name,
         metadata={'company_id': company.id},
     )
