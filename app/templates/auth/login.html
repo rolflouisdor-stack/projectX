@@ -7,6 +7,9 @@
         <h1 class="pp-auth-title">Welcome back</h1>
         <p class="pp-auth-sub">Sign in to your Gravitas Leads Mailer account.</p>
 
+        <div id="loginNotice" style="display:none;margin-bottom:14px;padding:10px 12px;border-radius:6px;
+             background:#eff6ff;color:#1e40af;font-size:14px;text-align:center;"></div>
+
         <form id="loginForm">
             <div class="pp-form-row">
                 <label class="pp-label" for="email">Work email</label>
@@ -30,22 +33,50 @@
 </div>
 
 <script nonce="{{ csp_nonce }}">
+const noticeEl = document.getElementById('loginNotice');
+function showNotice(text) { noticeEl.textContent = text; noticeEl.style.display = 'block'; }
+
+// Outcome of clicking an email-verification link (/verify -> /login?verify=...).
+const VERIFY_MSG = {
+    expired:  'That verification link has expired. Sign in to get a fresh one sent.',
+    invalid:  'That verification link is invalid or has already been used.',
+    already:  'Your email is already verified — go ahead and sign in.',
+    error:    'Something went wrong verifying your email. Please try again.',
+};
+const vp = new URLSearchParams(location.search).get('verify');
+if (vp && VERIFY_MSG[vp]) showNotice(VERIFY_MSG[vp]);
+
+async function resendVerification(email) {
+    try {
+        const r = await gmFetch('/api/auth/resend-verification', { method: 'POST', body: { email } });
+        showNotice((r && r.message) || 'If that account is unverified, a new link is on its way.');
+    } catch (_) {
+        showNotice('Could not resend right now — please try again shortly.');
+    }
+}
+
 document.getElementById('loginForm').addEventListener('submit', async (e) => {
     e.preventDefault();
     const errEl = document.getElementById('loginError');
     errEl.style.display = 'none';
+    const email = document.getElementById('email').value;
     try {
         await gmFetch('/api/auth/login', {
             method: 'POST',
-            body: {
-                email: document.getElementById('email').value,
-                password: document.getElementById('password').value,
-            },
+            body: { email, password: document.getElementById('password').value },
         });
         window.location.href = '/dashboard';
     } catch (e) {
         errEl.textContent = e.message;
         errEl.style.display = 'block';
+        // Unverified account → offer a one-click resend (CSP-safe, no inline handler).
+        if (/verify your email/i.test(e.message)) {
+            errEl.appendChild(document.createElement('br'));
+            const a = document.createElement('a');
+            a.href = '#'; a.className = 'pp-text-sm'; a.textContent = 'Resend verification email';
+            a.addEventListener('click', (ev) => { ev.preventDefault(); resendVerification(email); });
+            errEl.appendChild(a);
+        }
     }
 });
 </script>

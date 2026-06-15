@@ -182,3 +182,12 @@ def run_migrations(engine):
     # Actual amount charged (price grossed up for the Stripe fee), mirroring
     # scrub_jobs — so job history / dashboard show what the customer really paid.
     _add_column(engine, 'purchase_jobs', 'amount_paid_cents', 'BIGINT NULL DEFAULT 0')
+
+    # ── mailer_users: email verification ──
+    # DEFAULT 1 grandfathers every EXISTING user as verified at add-time, so the
+    # rollout never locks anyone out. New signups insert email_verified=0
+    # explicitly (the ORM sends the value), then verify via the emailed link.
+    _add_column(engine, 'mailer_users', 'email_verified', 'BOOLEAN NOT NULL DEFAULT 1')
+    _add_column(engine, 'mailer_users', 'verification_token', 'VARCHAR(64) NULL')
+    _add_column(engine, 'mailer_users', 'verification_sent_at', 'DATETIME NULL')
+    _add_index(engine, 'mailer_users', 'idx_mu_verif_token', ['verification_token'])

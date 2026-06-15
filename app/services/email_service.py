@@ -55,6 +55,48 @@ def send_email(to, subject, text, html=None):
         return False
 
 
+# ── Account emails (verification) ──────────────────────────────────────────
+
+def send_verification_email(to_email, full_name, token):
+    """Email a new signup the link that activates their account."""
+    link = _link(f"/verify?token={token}")
+    name = (full_name or '').split(' ')[0] or 'there'
+    subject = "Verify your email — Gravitas Leads Mailer"
+    text = (
+        f"Hi {name},\n\n"
+        f"Thanks for signing up for the Gravitas Leads Mailer Portal. Confirm your "
+        f"email address to activate your account and sign in:\n\n{link}\n\n"
+        f"This link expires in 24 hours. If you didn't create this account, you can "
+        f"ignore this email.\n\n— Gravitas Leads"
+    )
+    html = (
+        f"<p>Hi {name},</p>"
+        f"<p>Thanks for signing up for the Gravitas Leads Mailer Portal. Confirm your "
+        f"email address to activate your account and sign in:</p>"
+        f'<p><a href="{link}">Verify my email</a></p>'
+        f"<p>This link expires in 24 hours. If you didn't create this account, you can "
+        f"ignore this email.</p><p>— Gravitas Leads</p>"
+    )
+    return send_email(to_email, subject, text, html)
+
+
+def send_existing_account_notice(to_email, full_name):
+    """Sent when someone tries to sign up with an email that already has a
+    (verified) account — so the signup response can stay generic (no enumeration)
+    while the real owner learns of the attempt and how to get back in."""
+    link = _link("/login")
+    name = (full_name or '').split(' ')[0] or 'there'
+    subject = "You already have a Gravitas Leads account"
+    text = (
+        f"Hi {name},\n\n"
+        f"Someone (maybe you) tried to sign up using this email, but you already have "
+        f"an account. Just sign in instead:\n\n{link}\n\n"
+        f"If you've forgotten your password, use the 'Forgot?' link on the sign-in page. "
+        f"If this wasn't you, no action is needed.\n\n— Gravitas Leads"
+    )
+    return send_email(to_email, subject, text)
+
+
 # ── Job notifications ──────────────────────────────────────────────────────
 
 def notify_scrub_priced(job, to_email):

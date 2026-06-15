@@ -1,5 +1,5 @@
 from datetime import datetime
-from sqlalchemy import Column, BigInteger, String, DateTime, Enum, ForeignKey, Index
+from sqlalchemy import Column, BigInteger, String, DateTime, Enum, ForeignKey, Index, Boolean
 from app.extensions import Base
 
 
@@ -17,6 +17,13 @@ class MailerUser(Base):
     last_login_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
+    # Email verification. New signups start unverified and must click an emailed
+    # link before they can log in; existing users were grandfathered verified at
+    # migration time (the ADD COLUMN defaults to 1). The token is single-use.
+    email_verified = Column(Boolean, nullable=False, default=False)
+    verification_token = Column(String(64), nullable=True, index=True)
+    verification_sent_at = Column(DateTime, nullable=True)
+
     __table_args__ = (Index('idx_mu_email', 'email'),)
 
     def to_dict(self):
@@ -27,5 +34,6 @@ class MailerUser(Base):
             'email': self.email,
             'phone': self.phone,
             'role': self.role,
+            'email_verified': bool(self.email_verified),
             'last_login_at': self.last_login_at.isoformat() if self.last_login_at else None,
         }

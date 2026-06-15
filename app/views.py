@@ -1,8 +1,11 @@
 """Server-rendered HTML pages for the Mailer Portal."""
-from flask import Blueprint, render_template, redirect, g, current_app
+from datetime import datetime, timedelta
+from flask import Blueprint, render_template, redirect, g, current_app, request
 from app.auth.decorators import mailer_login_required, current_user_or_none
 
 views_bp = Blueprint('views', __name__)
+
+VERIFICATION_TTL = timedelta(hours=24)
 
 
 def _common_ctx(user=None, company=None):
@@ -37,6 +40,41 @@ def login_page():
 @views_bp.route('/signup')
 def signup_page():
     return render_template('auth/signup.html')
+
+
+@views_bp.route('/verify')
+def verify_email():
+    """Activate an account from the emailed link, then log the user straight in.
+    Single-use token; expires after VERIFICATION_TTL. On any failure we bounce to
+    /login with a flag the page can surface (expired/invalid)."""
+    from app.extensions import get_db
+    from app.models.mailer_user import MailerUser
+    from app.auth.jwt_utils import issue_token, set_session_cookie
+
+    token = (request.args.get('token') or '').strip()
+    if not token:
+        return redirect('/login?verify=invalid')
+    db = get_db()
+    if db is None:
+        return redirect('/login?verify=error')
+    user = db.query(MailerUser).filter_by(verification_token=token).first()
+    if not user:
+        # Either a bad token or one already consumed (e.g. link clicked twice).
+        return redirect('/login?verify=invalid')
+    if user.email_verified:
+        return redirect('/login?verify=already')
+    sent = user.verification_sent_at
+    if sent and (datetime.utcnow() - sent) > VERIFICATION_TTL:
+        return redirect('/login?verify=expired')
+
+    user.email_verified = True
+    user.verification_token = None            # single use
+    user.last_login_at = datetime.utcnow()
+    db.commit()
+
+    resp = redirect('/dashboard')
+    set_session_cookie(resp, issue_token(user.id, user.company_id))
+    return resp
 
 
 @views_bp.route('/dashboard')

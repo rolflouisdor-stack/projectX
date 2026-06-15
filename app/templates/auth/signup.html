@@ -49,7 +49,7 @@ document.getElementById('signupForm').addEventListener('submit', async (e) => {
     const errEl = document.getElementById('signupError');
     errEl.style.display = 'none';
     try {
-        await gmFetch('/api/auth/signup', {
+        const res = await gmFetch('/api/auth/signup', {
             method: 'POST',
             body: {
                 full_name: document.getElementById('full_name').value,
@@ -59,7 +59,16 @@ document.getElementById('signupForm').addEventListener('submit', async (e) => {
                 password: document.getElementById('password').value,
             },
         });
-        window.location.href = '/dashboard';
+        // Account is created unverified; show the "check your email" state
+        // instead of logging in (verification gates the first sign-in).
+        const card = document.querySelector('.pp-auth-card');
+        const msg = (res && res.message) ? res.message
+            : 'Check your inbox for a link to verify your account, then sign in.';
+        card.innerHTML =
+            '<h1 class="pp-auth-title">Check your email</h1>'
+            + '<p class="pp-auth-sub"></p>'
+            + '<div class="pp-auth-footer">Already verified? <a href="/login">Sign in</a></div>';
+        card.querySelector('.pp-auth-sub').textContent = msg;
     } catch (e) {
         errEl.textContent = e.message;
         errEl.style.display = 'block';
