@@ -1,7 +1,9 @@
 """SQLAlchemy session + cache extensions for the Mailer Portal."""
 import ssl
+from flask import request
 from sqlalchemy import create_engine
 from sqlalchemy.orm import DeclarativeBase, scoped_session, sessionmaker
+from flask_limiter import Limiter
 
 
 class Base(DeclarativeBase):
@@ -10,6 +12,23 @@ class Base(DeclarativeBase):
 
 db_session = None
 engine = None
+
+
+def client_ip():
+    """Real client IP behind Cloudflare + DO. `remote_addr` is the proxy, so all
+    clients would otherwise share one rate-limit bucket. Prefer Cloudflare's
+    CF-Connecting-IP, then the first X-Forwarded-For hop (matches
+    activity_logger), then remote_addr. Best-effort: spoofable if the DO origin
+    is hit directly, so login also rate-limits per-email (see auth/routes)."""
+    return (request.headers.get('CF-Connecting-IP')
+            or (request.headers.get('X-Forwarded-For') or '').split(',')[0].strip()
+            or request.remote_addr
+            or '127.0.0.1')
+
+
+# Rate limiter. Storage + headers configured in the app factory; limits are
+# declared per-route (no global default, so normal app traffic is unaffected).
+limiter = Limiter(key_func=client_ip)
 
 
 def _prepare_db_url(url):

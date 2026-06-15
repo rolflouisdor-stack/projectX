@@ -5,7 +5,7 @@ from datetime import datetime
 from flask import Blueprint, jsonify, request, g
 from werkzeug.security import generate_password_hash, check_password_hash
 
-from app.extensions import get_db
+from app.extensions import get_db, limiter
 from app.models.mailer_user import MailerUser
 from app.models.mailer_company import MailerCompany
 from app.models.activity_log import ACTION_SIGNUP, ACTION_LOGIN, ACTION_LOGOUT
@@ -23,7 +23,15 @@ def _err(msg, status=400):
     return jsonify({'error': msg}), status
 
 
+def _login_email_key():
+    """Rate-limit key for the per-account login limit: stops a password-spray
+    against one email even if the attacker rotates IPs."""
+    data = request.get_json(silent=True) or {}
+    return 'login:' + (data.get('email') or '').strip().lower()
+
+
 @auth_bp.route('/signup', methods=['POST'])
+@limiter.limit("5 per minute;20 per hour")
 def signup():
     data = request.get_json(silent=True) or {}
     full_name = (data.get('full_name') or '').strip()
@@ -74,6 +82,8 @@ def signup():
 
 
 @auth_bp.route('/login', methods=['POST'])
+@limiter.limit("10 per minute;100 per hour")
+@limiter.limit("5 per minute;20 per hour", key_func=_login_email_key)
 def login():
     data = request.get_json(silent=True) or {}
     email = (data.get('email') or '').strip().lower()

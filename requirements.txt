@@ -14,3 +14,4 @@ boto3==1.35.71
 redis==5.2.1
 rq==2.1.0
 stripe==11.6.0
+Flask-Limiter==4.1.1

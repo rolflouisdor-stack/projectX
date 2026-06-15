@@ -18,6 +18,24 @@ def create_app(config_class):
     from app.extensions import init_db
     init_db(app)
 
+    # Rate limiting (auth brute-force / signup abuse). Shared storage via Redis
+    # so limits hold across gunicorn workers; per-route limits are declared in
+    # the blueprints (no global default). Fail OPEN if the store is unreachable
+    # — a Redis hiccup must not lock everyone out of login.
+    app.config.setdefault('RATELIMIT_STORAGE_URI', app.config.get('REDIS_URL') or 'memory://')
+    app.config.setdefault('RATELIMIT_HEADERS_ENABLED', True)
+    app.config.setdefault('RATELIMIT_SWALLOW_ERRORS', True)
+    from app.extensions import limiter
+    limiter.init_app(app)
+
+    from flask import jsonify
+    @app.errorhandler(429)
+    def _rate_limited(e):
+        # All rate-limited routes are JSON auth endpoints; the frontend reads .error.
+        retry = getattr(e, 'description', '') or 'rate limit exceeded'
+        return jsonify({'error': 'Too many attempts. Please wait a minute and try again.',
+                        'detail': str(retry)}), 429
+
     # No-cache for static assets in dev — partner-portal session showed
     # how badly browsers/tunnels cache CSS otherwise.
     @app.after_request
