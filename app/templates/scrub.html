@@ -175,7 +175,7 @@
         </div>
 
         <div class="pp-flex-between">
-            <button class="pp-btn pp-btn-secondary" onclick="location.reload()">Start over</button>
+            <button class="pp-btn pp-btn-secondary" data-action="reload">Start over</button>
             <span class="pp-text-sm pp-text-muted">Pricing locked for 24 hours.</span>
         </div>
     </div>
@@ -281,7 +281,7 @@
 .gm-modal-card h3{font-size:20px;}
 </style>
 
-<script>
+<script nonce="{{ csp_nonce }}">
 const state = {
     step: 1,
     file: null,
@@ -342,7 +342,7 @@ function setFile(f) {
             <span>📄</span>
             <span class="pp-file-name">${f.name}</span>
             <span class="pp-file-size">${sizeMB} MB</span>
-            <button onclick="clearFile()" aria-label="Remove">×</button>
+            <button data-action="clear-file" aria-label="Remove">×</button>
         </div>`;
     document.getElementById('step1Next').disabled = false;
 }

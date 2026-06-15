@@ -1,7 +1,8 @@
 """Gravitas Leads — Mailer Portal Flask app factory."""
 import logging
 import os
-from flask import Flask
+import secrets
+from flask import Flask, g
 
 logging.basicConfig(level=logging.INFO,
                     format='%(asctime)s [%(levelname)s] %(name)s: %(message)s')
@@ -30,25 +31,33 @@ def create_app(config_class):
 
     # Baseline HTTP security headers on every response. The CSP allowlists the
     # only third-party origins the app loads: Stripe.js (payments) and jsDelivr
-    # (chart.js). 'unsafe-inline' for styles covers the inline <style>/style=
-    # attributes in the templates; scripts are NOT allowed inline. HSTS is
-    # harmless over plain HTTP (browsers ignore it) so it's safe in dev too.
-    # NOTE: 'unsafe-inline' in script-src is an interim measure — the templates
-    # use inline <script> blocks + a few inline onclick= handlers. The hardened
-    # follow-up is per-request nonces (tag every inline <script>, refactor the
-    # inline handlers). The rest of the policy still constrains object/base/frame
-    # and the allowed external script origins.
-    CSP = (
-        "default-src 'self'; "
-        "script-src 'self' 'unsafe-inline' https://js.stripe.com https://cdn.jsdelivr.net; "
-        "frame-src https://js.stripe.com; "
-        "img-src 'self' data:; "
-        "style-src 'self' 'unsafe-inline'; "
-        "connect-src 'self' https://api.stripe.com https://cdn.jsdelivr.net; "
-        "base-uri 'self'; "
-        "frame-ancestors 'none'; "
-        "object-src 'none'"
-    )
+    # (chart.js). Inline <script> blocks are allowed via a per-request nonce
+    # (NOT 'unsafe-inline'), so injected markup can't execute. Inline on*= event
+    # handlers are NOT covered by nonces and have been refactored to delegated
+    # listeners (data-action) — keep it that way. 'unsafe-inline' remains only
+    # for style-src (inline <style>/style= attributes). HSTS is harmless over
+    # plain HTTP (browsers ignore it) so it's safe in dev too.
+    def _build_csp(nonce):
+        return (
+            "default-src 'self'; "
+            f"script-src 'self' 'nonce-{nonce}' https://js.stripe.com https://cdn.jsdelivr.net; "
+            "frame-src https://js.stripe.com; "
+            "img-src 'self' data:; "
+            "style-src 'self' 'unsafe-inline'; "
+            "connect-src 'self' https://api.stripe.com https://cdn.jsdelivr.net; "
+            "base-uri 'self'; "
+            "frame-ancestors 'none'; "
+            "object-src 'none'"
+        )
+
+    @app.before_request
+    def _gen_csp_nonce():
+        # Fresh per request; templates read it via the csp_nonce context var.
+        g.csp_nonce = secrets.token_urlsafe(16)
+
+    @app.context_processor
+    def _inject_csp_nonce():
+        return {'csp_nonce': getattr(g, 'csp_nonce', '')}
 
     @app.after_request
     def _security_headers(response):
@@ -59,7 +68,8 @@ def create_app(config_class):
         response.headers.setdefault('Referrer-Policy', 'strict-origin-when-cross-origin')
         response.headers.setdefault('Permissions-Policy',
                                     'geolocation=(), microphone=(), camera=()')
-        response.headers.setdefault('Content-Security-Policy', CSP)
+        response.headers.setdefault('Content-Security-Policy',
+                                    _build_csp(getattr(g, 'csp_nonce', '')))
         return response
 
     # CORS — only kicks in if CORS_ORIGINS is configured. Same-origin browser

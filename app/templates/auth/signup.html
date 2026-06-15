@@ -43,7 +43,7 @@
     </div>
 </div>
 
-<script>
+<script nonce="{{ csp_nonce }}">
 document.getElementById('signupForm').addEventListener('submit', async (e) => {
     e.preventDefault();
     const errEl = document.getElementById('signupError');

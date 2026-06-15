@@ -37,7 +37,7 @@
                     <span class="pp-user-avatar">{{ partner.company_name[:1] | upper }}</span>
                     <span class="pp-user-name">{{ partner.company_name }}</span>
                 </span>
-                <button type="button" class="pp-btn pp-btn-ghost" onclick="gmLogout()">Logout</button>
+                <button type="button" class="pp-btn pp-btn-ghost" data-action="logout">Logout</button>
                 {% endif %}
             </div>
         </div>
@@ -56,7 +56,7 @@
         </div>
     </footer>
 
-    <script>
+    <script nonce="{{ csp_nonce }}">
     // ─── Shared helpers used by every mailer page ───
     async function gmFetch(url, opts) {
         opts = opts || {};
@@ -86,6 +86,23 @@
         try { await gmFetch('/api/auth/logout', { method: 'POST' }); } catch (e) {}
         window.location.href = '/login';
     }
+
+    // ─── Delegated click handler ───
+    // CSP nonces don't cover inline on*= handlers, so every button uses
+    // data-action="..." instead of onclick. One listener on <body> handles them
+    // all — and because it's delegation, it also works for rows injected later
+    // via innerHTML (e.g. the jobs table, the scrub file chip).
+    document.addEventListener('click', function (e) {
+        const el = e.target.closest && e.target.closest('[data-action]');
+        if (!el) return;
+        switch (el.getAttribute('data-action')) {
+            case 'logout':        e.preventDefault(); gmLogout(); break;
+            case 'reload':        e.preventDefault(); location.reload(); break;
+            case 'dismiss-promo': { const b = document.getElementById('promoBanner'); if (b) b.remove(); break; }
+            case 'clear-file':    if (typeof clearFile === 'function') clearFile(); break;
+            case 'delete-job':    if (typeof deleteJob === 'function') deleteJob(el.getAttribute('data-id')); break;
+        }
+    });
     function fmtNum(n) { return Number(n || 0).toLocaleString('en-US'); }
     function fmtMoney(cents) { return '$' + (Number(cents || 0) / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
 
