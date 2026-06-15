@@ -28,6 +28,35 @@ def create_app(config_class):
             response.headers['Expires'] = '0'
         return response
 
+    # Baseline HTTP security headers on every response. The CSP allowlists the
+    # only third-party origins the app loads: Stripe.js (payments) and jsDelivr
+    # (chart.js). 'unsafe-inline' for styles covers the inline <style>/style=
+    # attributes in the templates; scripts are NOT allowed inline. HSTS is
+    # harmless over plain HTTP (browsers ignore it) so it's safe in dev too.
+    CSP = (
+        "default-src 'self'; "
+        "script-src 'self' https://js.stripe.com https://cdn.jsdelivr.net; "
+        "frame-src https://js.stripe.com; "
+        "img-src 'self' data:; "
+        "style-src 'self' 'unsafe-inline'; "
+        "connect-src 'self' https://api.stripe.com; "
+        "base-uri 'self'; "
+        "frame-ancestors 'none'; "
+        "object-src 'none'"
+    )
+
+    @app.after_request
+    def _security_headers(response):
+        response.headers.setdefault('Strict-Transport-Security',
+                                    'max-age=63072000; includeSubDomains; preload')
+        response.headers.setdefault('X-Content-Type-Options', 'nosniff')
+        response.headers.setdefault('X-Frame-Options', 'DENY')
+        response.headers.setdefault('Referrer-Policy', 'strict-origin-when-cross-origin')
+        response.headers.setdefault('Permissions-Policy',
+                                    'geolocation=(), microphone=(), camera=()')
+        response.headers.setdefault('Content-Security-Policy', CSP)
+        return response
+
     # CORS — only kicks in if CORS_ORIGINS is configured. Same-origin browser
     # calls (mailer's own templates → mailer's own /api/) don't need it; this
     # is for cross-origin callers like the CX3 Dashboard once it has its own
