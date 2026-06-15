@@ -29,14 +29,36 @@ def create_app(config_class):
             response.headers['Expires'] = '0'
         return response
 
+    # The browser uploads scrub files (presigned multipart PUTs) and fetches
+    # results directly to/from object storage (DO Spaces in prod), so connect-src
+    # must allow that origin. Derive it from the S3 config so it tracks
+    # bucket/region/endpoint changes — include both the endpoint host (path-style)
+    # and the bucket-host (virtual-hosted style, the prod default).
+    def _spaces_connect_origins():
+        from urllib.parse import urlparse
+        ep = app.config.get('S3_ENDPOINT_URL') or ''
+        bucket = app.config.get('S3_BUCKET') or ''
+        origins = set()
+        if ep:
+            u = urlparse(ep)
+            if u.scheme and u.netloc:
+                origins.add(f"{u.scheme}://{u.netloc}")
+                if bucket and (app.config.get('S3_ADDRESSING_STYLE') or 'virtual') == 'virtual':
+                    origins.add(f"{u.scheme}://{bucket}.{u.netloc}")
+        return sorted(origins)
+
+    _spaces = _spaces_connect_origins()
+    _connect_src = " ".join(["'self'", "https://api.stripe.com", "https://cdn.jsdelivr.net", *_spaces])
+
     # Baseline HTTP security headers on every response. The CSP allowlists the
-    # only third-party origins the app loads: Stripe.js (payments) and jsDelivr
-    # (chart.js). Inline <script> blocks are allowed via a per-request nonce
-    # (NOT 'unsafe-inline'), so injected markup can't execute. Inline on*= event
-    # handlers are NOT covered by nonces and have been refactored to delegated
-    # listeners (data-action) — keep it that way. 'unsafe-inline' remains only
-    # for style-src (inline <style>/style= attributes). HSTS is harmless over
-    # plain HTTP (browsers ignore it) so it's safe in dev too.
+    # only third-party origins the app loads: Stripe.js (payments), jsDelivr
+    # (chart.js), and object storage (uploads/downloads via connect-src). Inline
+    # <script> blocks are allowed via a per-request nonce (NOT 'unsafe-inline'),
+    # so injected markup can't execute. Inline on*= event handlers are NOT covered
+    # by nonces and have been refactored to delegated listeners (data-action) —
+    # keep it that way. 'unsafe-inline' remains only for style-src (inline
+    # <style>/style= attributes). HSTS is harmless over plain HTTP (ignored) so
+    # it's safe in dev too.
     def _build_csp(nonce):
         return (
             "default-src 'self'; "
@@ -44,7 +66,7 @@ def create_app(config_class):
             "frame-src https://js.stripe.com; "
             "img-src 'self' data:; "
             "style-src 'self' 'unsafe-inline'; "
-            "connect-src 'self' https://api.stripe.com https://cdn.jsdelivr.net; "
+            f"connect-src {_connect_src}; "
             "base-uri 'self'; "
             "frame-ancestors 'none'; "
             "object-src 'none'"
