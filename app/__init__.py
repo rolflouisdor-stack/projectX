@@ -63,7 +63,7 @@ def create_app(config_class):
         return (
             "default-src 'self'; "
             f"script-src 'self' 'nonce-{nonce}' https://js.stripe.com https://cdn.jsdelivr.net; "
-            "frame-src https://js.stripe.com; "
+            "frame-src https://js.stripe.com https://hooks.stripe.com; "
             "img-src 'self' data:; "
             "style-src 'self' 'unsafe-inline'; "
             f"connect-src {_connect_src}; "
