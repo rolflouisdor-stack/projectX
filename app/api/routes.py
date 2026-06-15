@@ -630,7 +630,6 @@ def get_purchase_job(job_id):
     return jsonify(job.to_dict())
 
 
-@api_bp.route('/purchase-jobs/<int:job_id>/pay', methods=['POST'])
 def _complete_paid_purchase_job(db, job):
     """Generate the result file + mark a PAID purchase complete. Idempotent, no
     request context — safe from the stub path or the Stripe webhook."""
@@ -652,6 +651,7 @@ def _complete_paid_purchase_job(db, job):
                        'stripe_intent': job.stripe_payment_intent_id, 'kind': 'purchase'})
 
 
+@api_bp.route('/purchase-jobs/<int:job_id>/pay', methods=['POST'])
 @mailer_login_required
 def pay_purchase_job(job_id):
     """Charge for a records purchase. Stripe ON: PaymentIntent → client_secret,
