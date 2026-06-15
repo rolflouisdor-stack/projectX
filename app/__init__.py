@@ -33,13 +33,18 @@ def create_app(config_class):
     # (chart.js). 'unsafe-inline' for styles covers the inline <style>/style=
     # attributes in the templates; scripts are NOT allowed inline. HSTS is
     # harmless over plain HTTP (browsers ignore it) so it's safe in dev too.
+    # NOTE: 'unsafe-inline' in script-src is an interim measure — the templates
+    # use inline <script> blocks + a few inline onclick= handlers. The hardened
+    # follow-up is per-request nonces (tag every inline <script>, refactor the
+    # inline handlers). The rest of the policy still constrains object/base/frame
+    # and the allowed external script origins.
     CSP = (
         "default-src 'self'; "
-        "script-src 'self' https://js.stripe.com https://cdn.jsdelivr.net; "
+        "script-src 'self' 'unsafe-inline' https://js.stripe.com https://cdn.jsdelivr.net; "
         "frame-src https://js.stripe.com; "
         "img-src 'self' data:; "
         "style-src 'self' 'unsafe-inline'; "
-        "connect-src 'self' https://api.stripe.com; "
+        "connect-src 'self' https://api.stripe.com https://cdn.jsdelivr.net; "
         "base-uri 'self'; "
         "frame-ancestors 'none'; "
         "object-src 'none'"
