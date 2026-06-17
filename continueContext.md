@@ -1,6 +1,16 @@
 # Continue Context — rolling resume doc
 
-> **▶ RESUME 2026-06-08 — START HERE: [`RESUME_2026-06-08.md`](RESUME_2026-06-08.md)**.
+> **▶ RESUME 2026-06-15 — START HERE: [`RESUME_2026-06-15.md`](RESUME_2026-06-15.md)**.
+> Prod live/healthy on `3f690abf`. Today = **security hardening** (from the 2026-06-10 pentest, tracked in
+> [`SECURITY_REMEDIATION.md`](SECURITY_REMEDIATION.md)): security headers + strict **nonce-based CSP**,
+> **rate limiting** (Flask-Limiter, Redis) on login/signup, and **email-verification signup** that closes the
+> user-enumeration leak + a **breached-password (HIBP)** check. New `mailer_users` columns
+> (`email_verified`/`verification_token`/`verification_sent_at`); existing users grandfathered verified.
+> Also fixed two latent prod 500s: `/account` saved-card (stale Stripe customer) and **purchase `/pay`**
+> (route decorator was on the wrong function — buying records had never worked). New dep `Flask-Limiter`.
+> Dashboard↔mailer admin API wiring: [`DASHBOARD_INTEGRATION.md`](DASHBOARD_INTEGRATION.md).
+>
+> (Prior: 2026-06-08 — pricing-display consistency; see [`RESUME_2026-06-08.md`](RESUME_2026-06-08.md).)
 > Prod live/healthy on `ffc33a1`. Today = **pricing-display consistency fix**: the
 > amount actually charged (base price grossed up for the Stripe fee) now shows
 > identically across **checkout → email → Job History → dashboard**, and the UI no

@@ -1,8 +1,8 @@
 # Gravitas Leads — Mailer Portal
 
-**Version:** 1.4 (live in production — real Stripe + EmailOversight)
-**Date:** 2026-06-05 (V1.3 base 2026-05-22)
-**Status:** **LIVE in production at https://mailer.gravitasleads.io.** Real integrations: **Stripe** payments (Payment Element + saved cards + webhook + fee pass-through) and **EmailOversight** email cleaning (FTP round-trip; the cleaned file is the deliverable). The old Stripe/validator/scrub stubs are superseded (stub remains only as the `STRIPE_ENABLED=false` / `EO_FTP_ENABLED=false` dev fallback). Canonical endpoint reference: `docs/api-documentation.md`.
+**Version:** 1.5 (live in production — real Stripe + EmailOversight; security hardened)
+**Date:** 2026-06-15 (V1.4 2026-06-05; V1.3 base 2026-05-22)
+**Status:** **LIVE in production at https://mailer.gravitasleads.io.** Real integrations: **Stripe** payments (Payment Element + saved cards + webhook + fee pass-through) and **EmailOversight** email cleaning (FTP round-trip; the cleaned file is the deliverable). The old Stripe/validator/scrub stubs are superseded (stub remains only as the `STRIPE_ENABLED=false` / `EO_FTP_ENABLED=false` dev fallback). **V1.5 (2026-06-15) security hardening:** nonce-based CSP + security headers, auth rate limiting, **email-verification signup** (generic/non-enumerable; existing users grandfathered) + breached-password check — see `SECURITY_REMEDIATION.md` / `RESUME_2026-06-15.md`. Canonical endpoint reference: `docs/api-documentation.md`. CX3 Dashboard ↔ admin API wiring: `DASHBOARD_INTEGRATION.md`.
 **Lives at:** `/Users/rolf.louisdor/Desktop/mailer/` (relocated from `~/Desktop/Dashboard/gravitas-mailer/` on 2026-05-21).
 
 ---

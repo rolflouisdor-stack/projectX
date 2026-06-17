@@ -2,14 +2,17 @@
 
 > Single source of truth for resuming work on this project in a future session. Read top-to-bottom; everything you need to be productive in under 10 minutes is here. Detailed deep-dives are linked at the end.
 
-**Last updated:** 2026-05-27
+**Last updated:** 2026-06-15
 **Project path:** `/Users/rolf.louisdor/Desktop/mailer/`
 **Local URL:** `http://127.0.0.1:5070`
 **Test login:** `demo@brandface.com` / `Demo1234`
+**Newest resume doc:** [`RESUME_2026-06-15.md`](RESUME_2026-06-15.md) (security hardening) · [`SECURITY_REMEDIATION.md`](SECURITY_REMEDIATION.md) · [`DASHBOARD_INTEGRATION.md`](DASHBOARD_INTEGRATION.md)
 
 ---
 
-## 🔖 RESUME HERE — updated 2026-06-05
+## 🔖 RESUME HERE — updated 2026-06-15
+
+**Security hardening (2026-06-15, from the 2026-06-10 pentest — see [`SECURITY_REMEDIATION.md`](SECURITY_REMEDIATION.md)):** every response now carries HSTS + the standard security headers and a strict **nonce-based CSP**; auth routes are **rate limited** (Flask-Limiter, Redis); signup now requires **email verification** and returns a **generic, non-enumerable** response; signup also runs a **breached-password (HIBP)** check. New `mailer_users` columns (`email_verified`/`verification_token`/`verification_sent_at`); existing users grandfathered verified. New dep `Flask-Limiter`. ⚠️ Email is now **load-bearing for onboarding** (verification). Also fixed two latent prod 500s: `/account` saved-card (stale Stripe customer) and **purchase `/pay`** (route decorator on the wrong function — buying records had never worked). Prod on commit `3f690abf`. Connect the CX3 Dashboard to the admin API via [`DASHBOARD_INTEGRATION.md`](DASHBOARD_INTEGRATION.md).
 
 **The big picture:** **The app is LIVE in production at https://mailer.gravitasleads.io.** Phases 0–6 done. **EmailOversight clean flow is LIVE + proven at scale** (184k QA job round-tripped; prod Mandrill email). **Stripe is LIVE in production** — Payment Element + saved cards, live keys + live webhook, $0.50 min charge, and the Stripe fee is passed to the customer (gross-up). **For all current operational detail, open `continueContext.md` / `RESUME_2026-06-05.md`** — those are the rolling resume docs. This block is a one-glance summary.
 

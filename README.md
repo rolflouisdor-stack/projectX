@@ -4,11 +4,15 @@ External partner portal where mailers sign up, clean their email lists via Email
 
 🟢 **Live in production:** <https://mailer.gravitasleads.io>
 
+**Security posture** (hardened 2026-06-15 — see [`SECURITY_REMEDIATION.md`](SECURITY_REMEDIATION.md)): HSTS + strict nonce-based CSP and the standard security headers on every response; **email-verification signup** (no account is usable until the emailed link is clicked) with generic, non-enumerable responses; **breached-password check** (Have I Been Pwned) on signup; **rate limiting** (Flask-Limiter, Redis) on the auth routes; JWT session cookie is `Secure; HttpOnly; SameSite=Lax`.
+
 - **Full API reference:** [`docs/api-documentation.md`](docs/api-documentation.md)
 - **Current state / next steps (rolling):** [`continueContext.md`](continueContext.md)
 - **Project ledger (deeper background):** [`CONTEXT.md`](CONTEXT.md)
 - **Deploy to DigitalOcean (+ real-world learnings):** [`DEPLOYMENT.md`](DEPLOYMENT.md)
 - **Admin / cross-system API reference:** [`ADMIN_API.md`](ADMIN_API.md)
+- **Connect the CX3 Dashboard to the admin API:** [`DASHBOARD_INTEGRATION.md`](DASHBOARD_INTEGRATION.md)
+- **Security hardening tracker:** [`SECURITY_REMEDIATION.md`](SECURITY_REMEDIATION.md)
 - **Product spec:** [`Partner_portals_Spec.md`](Partner_portals_Spec.md)
 - **EmailOversight FTP integration:** [`FTP.md`](FTP.md)
 

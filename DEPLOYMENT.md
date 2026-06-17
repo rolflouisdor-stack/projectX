@@ -320,7 +320,7 @@ Deploy update: `ssh` in, `git pull`, `pip install -r requirements.txt` (if deps 
 | `STRIPE_WEBHOOK_SECRET` | **Yes, SECRET** | `whsec_...` from the live webhook (`/api/stripe/webhook`). |
 | `STRIPE_PASS_FEE` / `STRIPE_FEE_PERCENT` / `STRIPE_FEE_FIXED_CENTS` | Optional | Pass Stripe's fee to the customer (gross-up). Defaults: on, 2.9, 30. |
 | `MIN_CHARGE_CENTS` | Optional | Minimum order total (Stripe floor). Default 50. |
-| `EMAIL_ENABLED` / `SMTP_*` / `EMAIL_FROM` | **Yes for email** | Mandrill SMTP (prod key). `EMAIL_FROM=Gravitas Leads <noreply@gravitasleads.io>`. |
+| `EMAIL_ENABLED` / `SMTP_*` / `EMAIL_FROM` | **Yes — now load-bearing** | Mandrill SMTP (prod key). `EMAIL_FROM=Gravitas Leads <noreply@gravitasleads.io>`. **As of 2026-06-15 signup requires email verification**, so if this is off, new users can't verify and can't log in (existing users were grandfathered verified and are unaffected). |
 | `EO_FTP_ENABLED` | **`true` in prod** | EmailOversight clean flow. Needs `EO_FTP_PASSWORD` (SECRET), `EO_PRICE_PER_RECORD` (0.000375); host/user default correctly. Margin tiers via `EO_MARGIN_PCT_SMALL/MID/LARGE`. |
 | `EMAIL_VALIDATOR_ENABLED` | No | Legacy stub flag; EmailOversight is the real validator. |
 | `ARTIFACT_DIR` | Optional | Legacy local-FS path. Unused once Spaces is wired (below). |
@@ -333,8 +333,15 @@ Deploy update: `ssh` in, `git pull`, `pip install -r requirements.txt` (if deps 
 | `S3_MULTIPART_PART_SIZE_BYTES` | Optional | Default 10485760 (10 MiB). AWS min is 5 MiB. |
 | `S3_UPLOAD_URL_TTL` | Optional | Default 600s. Presigned PUT validity. |
 | `S3_DOWNLOAD_URL_TTL` | Optional | Default 3600s. Presigned GET validity. |
-| `REDIS_URL` | **Yes** | `redis://...`. Auto-injected when you attach a Managed Redis to the app. |
+| `REDIS_URL` | **Yes** | `redis://...`. Auto-injected when you attach a Managed Redis to the app. Backs the RQ worker **and** auth rate limiting (Flask-Limiter `RATELIMIT_STORAGE_URI` ← `REDIS_URL`; `memory://` fallback locally). Must be set on the **web** component, not just the worker. |
 | `RQ_QUEUE` | Optional | Default `mailer-default`. |
+
+> **2026-06-15 security hardening — no new env vars required.** Added dep `Flask-Limiter==4.1.1` (in
+> `requirements.txt`; App Platform installs it on the next build). Rate limiting reads `REDIS_URL` (above);
+> it fails **open** if Redis is unreachable, so a Redis outage can't lock users out. Email verification adds
+> `mailer_users` columns (`email_verified`/`verification_token`/`verification_sent_at`) applied automatically
+> by `run_migrations` at boot — existing users grandfathered verified (`ADD COLUMN ... DEFAULT 1`). Security
+> headers + nonce-CSP are code-only. See [`SECURITY_REMEDIATION.md`](SECURITY_REMEDIATION.md).
 
 ---
 

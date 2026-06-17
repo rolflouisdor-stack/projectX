@@ -37,6 +37,7 @@ Generated 2026-06-04. Source of truth is the code in `app/` — regenerate if ro
 - **Money** is integer **cents** (`price_cents`); some payloads also include a rounded `*_dollars` convenience field.
 - **Timestamps** are ISO-8601 UTC.
 - **CORS preflight:** an app-level `OPTIONS /<any path>` handler answers preflight requests.
+- **Security headers:** every response carries HSTS, `X-Content-Type-Options`, `X-Frame-Options: DENY`, `Referrer-Policy`, `Permissions-Policy`, and a strict **nonce-based CSP** (inline scripts require the per-request nonce; `script-src` has no `'unsafe-inline'`). Allowed external origins: Stripe (`js.stripe.com`/`hooks.stripe.com`/`api.stripe.com`), jsDelivr (chart.js), and DO Spaces (uploads/downloads).
 
 ---
 
@@ -199,22 +200,32 @@ HTML pages (blueprint `views`, no prefix). All except `/login` and `/signup` req
 
 Blueprint `auth`, prefix **`/api/auth`**.
 
+> **Rate limiting** (Flask-Limiter, Redis-backed; keyed by client IP via `CF-Connecting-IP`→`X-Forwarded-For`→`remote_addr`): `login` `10/min;100/hr` per IP **and** `5/min;20/hr` per email; `signup` `5/min;20/hr` per IP; `resend-verification` `3/min;10/hr`. Over-limit returns **`429`** `{ error, detail }` with `Retry-After` + `X-RateLimit-*` headers.
+
 ### POST `/api/auth/signup`
-Create a company (if new) + owner user, and start a session.
-- **Body:** `{ full_name, company_name, email, phone?, password }` — password ≥ 8 chars.
-- **Response:** `{ user, company }` + sets `gm_session` cookie.
-- **Errors:** `400` missing/invalid field, `409` email already exists, `503` DB unavailable.
+Create a company (if new) + an **unverified** owner user, and email a verification link. Does **not** start a session — the account is inert until the email is verified.
+- **Body:** `{ full_name, company_name, email, phone?, password }` — password ≥ 8 chars and must not appear in the Have I Been Pwned breach corpus.
+- **Response:** `200 { message }` — a **generic** message that is identical whether or not the email already exists (so the endpoint can't be used to enumerate users). If the email already exists, no account is created; an unverified one is re-sent its link, a verified one gets a sign-in reminder email.
+- **Errors:** `400` missing/invalid field or breached password, `429` rate limited, `503` DB unavailable. (No `409` — existence is never revealed.)
+
+### GET `/verify?token=<token>` *(server-rendered, not under `/api`)*
+Activates an account from the emailed link, then auto-logs-in (sets `gm_session`) and redirects to `/dashboard`. Single-use token, 24h TTL.
+- **On failure:** `302` to `/login?verify=invalid|expired|already|error`.
+
+### POST `/api/auth/resend-verification`
+Re-send the verification link. Generic response (no enumeration).
+- **Body:** `{ email }` · **Response:** `200 { message }` · **Errors:** `429` rate limited.
 
 ### POST `/api/auth/login`
 - **Body:** `{ email, password }`
 - **Response:** `{ user, company }` + sets `gm_session` cookie.
-- **Errors:** `400` missing fields, `401` invalid credentials.
+- **Errors:** `400` missing fields, `401` invalid credentials, **`403` `{ error, unverified: true, email }`** if the account's email isn't verified yet, `429` rate limited.
 
 ### POST `/api/auth/logout`
 Clears the session cookie. **Response:** `{ ok: true }`.
 
 ### GET `/api/auth/me`
-Current session identity. **Auth:** session. **Response:** `{ user, company, is_admin }`.
+Current session identity. **Auth:** session. **Response:** `{ user, company, is_admin }` (the `user` object includes `email_verified`).
 
 ---
 
