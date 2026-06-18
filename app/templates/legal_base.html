@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{% block title %}Gravitas Leads{% endblock %}</title>
+<meta name="robots" content="index, follow">
+<link rel="shortcut icon" type="image/x-icon" href="{{ L }}/images/favicon.png">
+<link rel="stylesheet" type="text/css" href="{{ L }}/css/style.css">
+</head>
+<body class="legal-body">
+
+<header class="legal-header">
+    <div class="container">
+        <a href="/" class="legal-brand"><img src="{{ L }}/images/logo.png" class="legal-logo" alt="Gravitas Leads"></a>
+        <nav class="legal-nav">
+            <a href="/terms-of-service">Terms</a>
+            <a href="/privacy-policy">Privacy</a>
+            <a href="https://mailer.gravitasleads.io">Publisher Portal</a>
+        </nav>
+    </div>
+</header>
+
+<main class="legal-main">
+    <div class="container">
+        <div class="legal-content">
+            {% block legal_content %}{% endblock %}
+        </div>
+    </div>
+</main>
+
+<footer class="legal-footer">
+    <div class="container">
+        <p>&copy; 2026 Gravitas Leads. All Rights Reserved &nbsp;|&nbsp;
+           <a href="/">Home</a> &nbsp;|&nbsp;
+           <a href="/terms-of-service">Terms of Service</a> &nbsp;|&nbsp;
+           <a href="/privacy-policy">Privacy Policy</a> &nbsp;|&nbsp;
+           <a href="mailto:hello@gravitasleads.com">hello@gravitasleads.com</a>
+        </p>
+    </div>
+</footer>
+
+</body>
+</html>

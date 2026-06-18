@@ -41,6 +41,16 @@ def root():
     return redirect('/login')
 
 
+@views_bp.route('/terms-of-service')
+def terms_page():
+    return render_template('terms.html', L=url_for('static', filename='landing'))
+
+
+@views_bp.route('/privacy-policy')
+def privacy_page():
+    return render_template('privacy.html', L=url_for('static', filename='landing'))
+
+
 @views_bp.route('/login')
 def login_page():
     return render_template('auth/login.html')
