@@ -1,11 +1,17 @@
 """Server-rendered HTML pages for the Mailer Portal."""
 from datetime import datetime, timedelta
-from flask import Blueprint, render_template, redirect, g, current_app, request
+from flask import Blueprint, render_template, redirect, g, current_app, request, url_for
 from app.auth.decorators import mailer_login_required, current_user_or_none
 
 views_bp = Blueprint('views', __name__)
 
 VERIFICATION_TTL = timedelta(hours=24)
+
+# Hosts that should serve the public marketing landing page at `/` instead of the
+# portal redirect. The portal lives at mailer.gravitasleads.io; the apex (and www)
+# show the landing page. Everything else (the DO app URL, localhost) keeps the
+# portal behavior — preview the landing locally with `curl -H 'Host: gravitasleads.io'`.
+LANDING_HOSTS = {'gravitasleads.io', 'www.gravitasleads.io'}
 
 
 def _common_ctx(user=None, company=None):
@@ -26,6 +32,9 @@ def _stripe_ctx():
 
 @views_bp.route('/')
 def root():
+    host = (request.host or '').split(':')[0].lower()
+    if host in LANDING_HOSTS:
+        return render_template('landing.html', L=url_for('static', filename='landing'))
     user, company = current_user_or_none()
     if user:
         return redirect('/dashboard')

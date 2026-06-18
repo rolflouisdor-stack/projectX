@@ -4,12 +4,14 @@ All endpoints assume an authenticated mailer (via the @mailer_login_required
 decorator). They write activity_log rows for every meaningful action.
 """
 import math
+import re
 import logging
 from datetime import datetime
 from flask import Blueprint, jsonify, request, g, redirect, abort
 
-from app.extensions import get_db
+from app.extensions import get_db, limiter
 from app.auth.decorators import mailer_login_required
+from app.services import email_service
 from app.models.vertical import Vertical
 from app.models.subcategory import Subcategory
 from app.models.scrub_job import ScrubJob
@@ -35,6 +37,47 @@ from app.jobs.queue import (
 
 logger = logging.getLogger(__name__)
 api_bp = Blueprint('api', __name__, url_prefix='/api')
+
+_CONTACT_EMAIL_RE = re.compile(r'^[^\s@]+@[^\s@]+\.[^\s@]+$')
+
+
+# ── Public: landing-page "Advertise with us" contact form ──────────────────
+
+@api_bp.route('/landing/contact', methods=['POST'])
+@limiter.limit("5 per hour;20 per day")
+def landing_contact():
+    """Advertiser/data-owner enquiry from the gravitasleads.io landing page.
+    Public (no session). Emails the team via the existing relay. Rate-limited;
+    a honeypot field drops bots silently."""
+    data = request.get_json(silent=True) or {}
+    # Honeypot: real users never see/fill `website`. If set, pretend success.
+    if (data.get('website') or '').strip():
+        return jsonify({'message': 'Thanks — we got your message and will be in touch shortly.'}), 200
+
+    name = (data.get('name') or '').strip()
+    email = (data.get('email') or '').strip()
+    company = (data.get('company') or '').strip()
+    message = (data.get('message') or '').strip()
+    if not name:
+        return jsonify({'error': 'Please enter your name.'}), 400
+    if not _CONTACT_EMAIL_RE.match(email):
+        return jsonify({'error': 'Please enter a valid email.'}), 400
+
+    body = (
+        "New advertiser / data-owner enquiry from the gravitasleads.io landing page:\n\n"
+        f"Name:    {name}\n"
+        f"Email:   {email}\n"
+        f"Company: {company or '—'}\n\n"
+        f"Message:\n{message or '(none)'}\n"
+    )
+    ok = email_service.send_email('hello@gravitasleads.com',
+                                  f'Advertiser enquiry — {name}', body)
+    if not ok:
+        # Email disabled/failed — don't lose the lead; log it and tell the user a fallback.
+        logger.warning("landing contact email not sent (EMAIL_ENABLED off or SMTP error): %s <%s>",
+                       name, email)
+        return jsonify({'error': 'Could not send right now — please email hello@gravitasleads.com directly.'}), 502
+    return jsonify({'message': 'Thanks — we got your message and will be in touch shortly.'}), 200
 
 
 # ── Verticals + subcategories ─────────────────────────────────────────────
