@@ -76,7 +76,7 @@ def landing_contact():
         # Email disabled/failed — don't lose the lead; log it and tell the user a fallback.
         logger.warning("landing contact email not sent (EMAIL_ENABLED off or SMTP error): %s <%s>",
                        name, email)
-        return jsonify({'error': 'Could not send right now — please email hello@gravitasleads.com directly.'}), 502
+        return jsonify({'error': 'Could not send your message right now — please try again shortly.'}), 502
     return jsonify({'message': 'Thanks — we got your message and will be in touch shortly.'}), 200
 
 
